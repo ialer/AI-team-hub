@@ -103,6 +103,78 @@ jobs:
           [ "$REPLY" = "pong" ] || { echo "unexpected reply: [$REPLY]"; exit 1; }
           echo "smoke test passed"
 
+      # The onboarding path is the part a new user hits first, so it gets its
+      # own end-to-end check: invite code → join → agent exists → token works.
+      - name: Onboarding smoke test (invite → join → authenticated call)
+        run: |
+          cat > config.json <<'EOF'
+          {
+            "host": "127.0.0.1",
+            "port": 8899,
+            "adminToken": "ci-join-token",
+            "wakeTimeout": 30,
+            "agents": [{ "id": "seed", "name": "seed", "mode": "connector" }]
+          }
+          EOF
+
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+
+          ADMIN=ci-join-token
+          BASE=http://127.0.0.1:8899
+
+          # 1) admin token required
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/admin/invites)
+          [ "$code" = "401" ] || { echo "invite without admin should be 401, got $code"; exit 1; }
+
+          # 2) mint an invite
+          INV=$(curl -sf -X POST $BASE/api/admin/invites -H "X-Admin-Token: $ADMIN" \
+                -H 'Content-Type: application/json' -d '{"ttlSec":60,"uses":1}')
+          CODE=$(echo "$INV" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).invite.code))")
+          [ -n "$CODE" ] || { echo "no invite code"; exit 1; }
+          echo "invite: $CODE"
+
+          # 3) join
+          JOIN=$(curl -sf -X POST $BASE/api/join -H 'Content-Type: application/json' \
+                 -d "{\"code\":\"$CODE\",\"id\":\"newbie\",\"name\":\"Newbie\",\"role\":\"test\"}")
+          TOKEN=$(echo "$JOIN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).token))")
+
+          # 4) the agent is visible without a restart
+          curl -sf $BASE/api/state | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const a = JSON.parse(s).agents;
+              if (!a.newbie) { console.error('joined agent missing from /api/state'); process.exit(1); }
+              console.log('joined agent visible');
+            });"
+
+          # 5) its token authenticates
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+                 -H "X-Agent-Id: newbie" -H "X-Agent-Token: $TOKEN" \
+                 "$BASE/api/agent/poll?agent=newbie&timeout=1")
+          [ "$code" = "200" ] || { echo "joined token should authenticate, got $code"; exit 1; }
+
+          # 6) a wrong token must not
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+                 -H "X-Agent-Id: newbie" -H "X-Agent-Token: wrong" \
+                 "$BASE/api/agent/poll?agent=newbie&timeout=1")
+          [ "$code" = "401" ] || { echo "wrong token should be 401, got $code"; exit 1; }
+
+          # 7) the code is single use
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST $BASE/api/join \
+                 -H 'Content-Type: application/json' -d "{\"code\":\"$CODE\",\"id\":\"second\"}")
+          [ "$code" = "403" ] || { echo "reused invite should be 403, got $code"; exit 1; }
+
+          # 8) removal is immediate
+          curl -sf -X DELETE "$BASE/api/admin/agents/newbie" -H "X-Admin-Token: $ADMIN" > /dev/null
+          curl -sf $BASE/api/state | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              if (JSON.parse(s).agents.newbie) { console.error('removed agent still present'); process.exit(1); }
+              console.log('removed agent gone');
+            });"
+
+          echo "onboarding smoke test passed"
       - name: Static assets are served
         run: |
           node server/index.mjs &

@@ -162,6 +162,18 @@ export class Hub {
     this.wsSender = fn;
   }
 
+  /**
+   * Rebuild the @ mention resolver.
+   *
+   * Must be called whenever the agent roster changes at runtime — otherwise a
+   * freshly joined agent is invisible to @ parsing and never wakes.
+   */
+  refreshAgents() {
+    this.resolveMentions = createMentionResolver(this.registry.list());
+    this.sse.broadcast('presence', { agents: this.registry.publicView() });
+    this.sse.broadcast('roster', this.state());
+  }
+
   /** Push path: call the adapter and post its reply back as a normal message. */
   async wakeViaAdapter(agent, message) {
     const adapter = getAdapter(agent.adapter);

@@ -65,7 +65,40 @@ node server/index.mjs
 
 没有 `npm install`，没有构建步骤。Node 20+ 即可。
 
-### 加一个 agent
+### 加一个 agent（一条命令）
+
+**在 Hub 机器上**生成加入码：
+
+```bash
+npx ai-team-hub invite --ttl 30
+# ✔ 加入码已生成：QSMW2P69
+#   在新 agent 的机器上执行：
+#   npx ai-team-hub join http://hub-host:8899 --code QSMW2P69
+```
+
+**在 agent 那台机器上**：
+
+```bash
+npx ai-team-hub join http://hub-host:8899 --code QSMW2P69 \
+  --id my-agent --name "我的助手" --role "数据分析"
+```
+
+到这一步 agent 已经出现在 Hub 里了 —— **不改配置、不重启、不断别人连接**。
+
+然后告诉它怎么被调用（编辑 `~/.ath/agent.json` 的 `config`），启动连接：
+
+```bash
+npx ai-team-hub connect
+npx ai-team-hub doctor     # 自检：Hub 可达 / token 有效 / 本地命令能跑
+```
+
+完整说明见 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
+
+> **不用 Node 也行。** 三个 HTTP 接口（hello / poll / reply），`curl` 就能接；
+> 见 [`examples/minimal-agent.sh`](examples/minimal-agent.sh)。
+
+<details>
+<summary>也可以用 config.json 声明（适合随 Hub 一起版本管理的固定成员）</summary>
 
 1. 在 `config.json` 的 `agents` 里加一项：
 
@@ -78,17 +111,9 @@ node server/index.mjs
 }
 ```
 
-2. 取它的 token：
+2. 取它的 token：`node server/tokens.mjs my-agent`
 
-```bash
-node server/tokens.mjs my-agent
-```
-
-3. **在 agent 那台机器上**跑 connector：
-
-```bash
-node connectors/connector.mjs --config my-agent.json --verbose
-```
+3. **在 agent 那台机器上**写配置并跑 connector：
 
 ```json
 // my-agent.json
@@ -97,16 +122,17 @@ node connectors/connector.mjs --config my-agent.json --verbose
   "id": "my-agent",
   "token": "<上一步拿到的 token>",
   "driver": "cli-once",
-  "config": {
-    "command": "my-agent-cli",
-    "args": ["run", "{text}"]
-  }
+  "config": { "command": "my-agent-cli", "args": ["run", "{text}"] }
 }
 ```
 
-就这样。Hub 不需要知道你那台机器的地址、SSH、密码。
+```bash
+node connectors/connector.mjs --config my-agent.json --verbose
+```
 
----
+这种 agent 由 config 管理：改它要改 config 并重启 Hub。
+
+</details>
 
 ## 两种接入模式
 

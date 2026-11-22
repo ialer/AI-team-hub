@@ -22,6 +22,7 @@ import { createSurfaces } from './surfaces.mjs';
 import { createStorage } from './storage.mjs';
 import { attachWebSocket } from './ws.mjs';
 import { DiscussionManager } from './discussions.mjs';
+import { InviteStore } from './invites.mjs';
 import { assertImage, imageSize, contentHash, parseMultipart, MAX_UPLOAD_BYTES } from './media.mjs';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
@@ -43,6 +44,34 @@ for (const agent of config.agents) {
 const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
 const surfaces = createSurfaces({ dataDir: config.dataDir, log });
 const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
+
+/* ── runtime-joined agents ──
+   Agents that arrived with an invite code live here, not in config.json, so
+   onboarding never requires editing the hub's config or restarting it. */
+const joinedStore = new JsonStore(config.dataDir, 'agents.json');
+const invites = new InviteStore(new JsonStore(config.dataDir, 'invites.json'));
+const joinedAgents = Object.values(joinedStore.all());
+for (const a of joinedAgents) {
+  try {
+    registry.addAgent({ ...a, source: 'join' });
+    const sid = sessions.get(a.id, null);
+    if (sid) registry.markSeen(a.id, { online: false, sessionId: sid });
+  } catch (e) {
+    log.line(`skipped bad joined agent ${a && a.id}: ${e.message}`);
+  }
+}
+if (joinedAgents.length) log.line(`restored ${joinedAgents.length} joined agent(s) from data/agents.json`);
+invites.prune();
+
+function persistJoined() {
+  const map = {};
+  for (const a of registry.joined()) {
+    const { source, ...rest } = a;
+    map[a.id] = rest;
+  }
+  joinedStore.data = map;
+  joinedStore.save();
+}
 
 const discussions = new DiscussionManager({
   hub, registry, sse, log,
@@ -432,6 +461,101 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, message });
       }
       return sendJson(res, 200, { ok: true });
+    }
+
+    /* ── join: self-service onboarding ──
+       A new agent trades an invite code for its token. No config edit on the
+       hub, no restart. This is the difference between "onboarding" and
+       "surgery on the hub". */
+    if (p === '/api/join' && req.method === 'POST') {
+      const body = await readBody(req);
+      const check = invites.consume(body.code);
+      if (!check.ok) return sendJson(res, 403, { error: check.reason });
+
+      const id = String(body.id || '').trim();
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/i.test(id)) {
+        return sendJson(res, 400, { error: 'id must be 2-32 chars: letters, digits, - or _' });
+      }
+      if (registry.get(id)) return sendJson(res, 409, { error: `agent "${id}" already exists` });
+
+      const agent = registry.addAgent({
+        id,
+        name: String(body.name || id).slice(0, 40),
+        role: String(body.role || '').slice(0, 40),
+        color: body.color || '#7f88a8',
+        mode: 'connector',
+        source: 'join',
+      });
+      persistJoined();
+      hub.refreshAgents();
+
+      const token = registry.tokenFor(id);
+      log.line(`join ${id} (${agent.name}) via invite ${check.invite.code}`);
+      return sendJson(res, 200, {
+        ok: true,
+        agent: { id, name: agent.name, role: agent.role },
+        token,
+        hub: `http://${req.headers.host}`,
+        transports: {
+          poll: '/api/agent/poll',
+          stream: '/api/agent/stream',
+          ws: '/ws?role=agent',
+        },
+      });
+    }
+
+    /* ── admin: invite codes ── */
+    if (p === '/api/admin/invites' && (req.method === 'GET' || req.method === 'POST')) {
+      const token = req.headers['x-admin-token'] || bearer(req) || url.searchParams.get('admin');
+      if (!registry.verifyAdmin(token)) return sendJson(res, 401, { error: 'admin token required' });
+
+      if (req.method === 'GET') {
+        return sendJson(res, 200, { invites: invites.list(), agents: registry.list() });
+      }
+      const body = await readBody(req).catch(() => ({}));
+      const invite = invites.create({
+        ttlSec: body.ttlSec,
+        uses: body.uses,
+        note: body.note,
+      });
+      log.line(`invite ${invite.code} created (${invite.maxUses} use, ${Math.round((invite.expiresAt - Date.now()) / 60000)}min)`);
+      return sendJson(res, 200, {
+        ok: true,
+        invite,
+        // Ready-to-paste command for the new agent's machine.
+        command: `npx ai-team-hub join http://${req.headers.host} --code ${invite.code}`,
+      });
+    }
+
+    /* ── admin: remove an agent ──
+       Only joined agents can be removed here: config-declared ones are owned by
+       config.json, and silently deleting them would make the two sources
+       disagree until the next restart. */
+    if (p.startsWith('/api/admin/agents/') && req.method === 'DELETE') {
+      const token = req.headers['x-admin-token'] || bearer(req) || url.searchParams.get('admin');
+      if (!registry.verifyAdmin(token)) return sendJson(res, 401, { error: 'admin token required' });
+      const id = decodeURIComponent(p.split('/').pop());
+      const agent = registry.get(id);
+      if (!agent) return sendJson(res, 404, { error: 'not found' });
+      if (agent.source !== 'join') {
+        return sendJson(res, 409, { error: `"${id}" is declared in config.json — remove it there and restart` });
+      }
+      registry.removeAgent(id);
+      persistJoined();
+      hub.refreshAgents();
+      log.line(`agent ${id} removed by admin`);
+      return sendJson(res, 200, { ok: true, removed: id });
+    }
+
+    /* ── public hub info, for `ath doctor` and discovery ── */
+    if (p === '/api/hub' && req.method === 'GET') {
+      return sendJson(res, 200, {
+        name: 'AI-team-hub',
+        version: config.version || '0.3.0',
+        agents: registry.list().length,
+        online: Object.values(registry.publicView()).filter((a) => a.online).length,
+        joinPolicy: 'invite-code',
+      });
     }
 
     /* ── discussions ── */

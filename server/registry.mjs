@@ -19,6 +19,44 @@ export class AgentRegistry {
     return this.agents.get(id) || null;
   }
 
+  /**
+   * Register an agent at runtime.
+   *
+   * This is what makes onboarding possible without editing config.json or
+   * restarting the hub: a joined agent exists immediately, and the caller
+   * persists it so it survives a restart.
+   */
+  addAgent(agent) {
+    if (!agent || !agent.id) throw new Error('agent needs an id');
+    const normalised = {
+      id: String(agent.id),
+      name: agent.name || agent.id,
+      role: agent.role || '',
+      color: agent.color || '#7f8fa8',
+      mode: agent.mode === 'push' ? 'push' : 'connector',
+      adapter: agent.adapter || null,
+      adapterConfig: agent.config || {},
+      sessionId: agent.sessionId || null,
+      enabled: agent.enabled !== false,
+      // Where it came from, so an operator can tell config-declared agents from
+      // ones that joined with an invite code.
+      source: agent.source || 'config',
+    };
+    this.agents.set(normalised.id, normalised);
+    return normalised;
+  }
+
+  removeAgent(id) {
+    this.presence.delete(id);
+    this.connections.delete(id);
+    return this.agents.delete(id);
+  }
+
+  /** Agents that were added at runtime (not declared in config.json). */
+  joined() {
+    return this.list().filter((a) => a.source === 'join');
+  }
+
   list() {
     return [...this.agents.values()];
   }
