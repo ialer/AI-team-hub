@@ -88,9 +88,11 @@ export class WakeQueue {
 
   push(agentId, payload) {
     const item = { id: this.seq++, payload, at: Date.now() };
-    const list = this.pending.get(agentId) || [];
+    // Prune FIRST, then append — calling _prune() after the set would replace
+    // the array with a stale copy and silently drop the wake we just queued.
+    const list = this._prune(agentId);
     list.push(item);
-    this.pending.set(agentId, this._prune(agentId));
+    this.pending.set(agentId, list);
     this._flush(agentId);
     return item.id;
   }

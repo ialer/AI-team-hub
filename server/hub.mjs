@@ -222,6 +222,23 @@ export class Hub {
     if (reason === 'replied') this.sse.broadcast('typing', { who: agentId, on: false });
   }
 
+  /**
+   * The agent's last poller went away.
+   *
+   * If it was mid-turn the wake is still in the queue, so drop the in-flight
+   * marker (but keep the queued wake) — otherwise the agent stays "busy" until
+   * the timeout and every new mention is silently skipped.
+   */
+  agentWentOffline(agentId) {
+    const entry = this.inFlight.get(agentId);
+    if (entry && entry.phase === 'queued') {
+      clearTimeout(entry.timer);
+      this.inFlight.delete(agentId);
+      this.sse.broadcast('typing', { who: agentId, on: false });
+      this.log.line(`${agentId} went offline with a queued wake; kept for reconnect`);
+    }
+  }
+
   /** A hub-authored notice (failures, timeouts). Never wakes anyone. */
   systemNotice(room, text) {
     const m = this.messages.append({ room: room || this.config.defaultRoom, from: 'system', text, mentions: [], kind: 'system' });

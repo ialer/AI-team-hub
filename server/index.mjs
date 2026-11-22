@@ -171,7 +171,9 @@ const server = http.createServer(async (req, res) => {
       let closed = false;
       req.on('close', () => {
         closed = true;
-        registry.removeConnection(agent.id);
+        const remaining = registry.removeConnection(agent.id);
+        // Last poller gone → the agent is not processing anything we can see.
+        if (remaining === 0) hub.agentWentOffline(agent.id);
         sse.broadcast('presence', { agents: registry.publicView() });
       });
 
