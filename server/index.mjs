@@ -19,6 +19,8 @@ import { AgentRegistry } from './registry.mjs';
 import { SseHub, WakeQueue } from './transport.mjs';
 import { Hub } from './hub.mjs';
 import { createSurfaces } from './surfaces.mjs';
+import { createStorage } from './storage.mjs';
+import { assertImage, imageSize, contentHash, parseMultipart, MAX_UPLOAD_BYTES } from './media.mjs';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
 const config = loadConfig();
@@ -38,6 +40,7 @@ for (const agent of config.agents) {
 
 const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
 const surfaces = createSurfaces({ dataDir: config.dataDir, log });
+const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
 
 /* ── helpers ──────────────────────────────────────────── */
 
@@ -68,7 +71,11 @@ async function readBody(req, limit = 1_000_000) {
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw new Error('payload too large');
+    if (size > limit) {
+      const err = new Error('payload too large');
+      err.status = 413;
+      throw err;
+    }
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
@@ -77,6 +84,22 @@ async function readBody(req, limit = 1_000_000) {
   } catch {
     throw new Error('invalid JSON body');
   }
+}
+
+/** Read a request body as raw bytes (multipart cannot be JSON-parsed). */
+async function readBodyRaw(req, limit) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) {
+      const err = new Error('payload too large');
+      err.status = 413;
+      throw err;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 function bearer(req) {
@@ -150,6 +173,7 @@ const server = http.createServer(async (req, res) => {
         from,
         text: body.text,
         refs: Array.isArray(body.refs) ? body.refs : [],
+        images: Array.isArray(body.images) ? body.images : [],
         dialog: body.dialog || null,
       });
       return sendJson(res, 200, { ok: true, message });
@@ -230,6 +254,76 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/adapters' && req.method === 'GET') {
       const { listAdapters } = await import('./adapters/index.mjs');
       return sendJson(res, 200, { adapters: listAdapters() });
+    }
+
+    /* ── media: upload ──
+       Accepts either multipart/form-data (a file part) or JSON { dataUrl }.
+       The declared type is ignored: the bytes decide. */
+    if (p === '/api/upload' && req.method === 'POST') {
+      const ctype = String(req.headers['content-type'] || '');
+
+      let buffer;
+      if (ctype.startsWith('multipart/form-data')) {
+        const m = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(ctype);
+        const boundary = m && (m[1] || m[2]);
+        if (!boundary) return sendJson(res, 400, { error: 'missing multipart boundary' });
+        const raw = await readBodyRaw(req, MAX_UPLOAD_BYTES + 1_000_000);
+        const parsed = parseMultipart(raw, boundary);
+        if (!parsed.file) return sendJson(res, 400, { error: 'no file part' });
+        buffer = parsed.file.buffer;
+      } else {
+        const body = await readBody(req, Math.ceil(MAX_UPLOAD_BYTES * 1.4));
+        const dataUrl = body.dataUrl || body.data;
+        if (!dataUrl) return sendJson(res, 400, { error: 'expected dataUrl' });
+        const comma = String(dataUrl).indexOf(',');
+        if (comma < 0) return sendJson(res, 400, { error: 'malformed dataUrl' });
+        buffer = Buffer.from(String(dataUrl).slice(comma + 1), 'base64');
+      }
+
+      const kind = assertImage(buffer);
+      const hash = contentHash(buffer);
+      const key = `${hash.slice(0, 2)}/${hash}.${kind.ext}`;
+      const { url } = await storage.put(key, buffer, kind.mime);
+      const size = imageSize(buffer, kind.mime);
+
+      log.line(`upload ${key} ${Math.round(buffer.length / 1024)}KB via ${storage.driver}`);
+      return sendJson(res, 200, {
+        ok: true,
+        url,
+        key,
+        hash,
+        mime: kind.mime,
+        bytes: buffer.length,
+        ...(size ? { w: size.w, h: size.h } : {}),
+      });
+    }
+
+    /* ── media: read ── */
+    if (p.startsWith('/api/file/') && req.method === 'GET') {
+      const key = decodeURIComponent(p.slice('/api/file/'.length));
+      // Never let a key escape the storage root.
+      if (!key || key.includes('..') || key.startsWith('/')) {
+        return sendJson(res, 400, { error: 'bad key' });
+      }
+      const obj = await storage.get(key);
+      if (!obj) return sendJson(res, 404, { error: 'not found' });
+
+      const ext = path.extname(key).slice(1).toLowerCase();
+      const MIME_BY_EXT = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+        gif: 'image/gif', webp: 'image/webp', avif: 'image/avif',
+      };
+      const headers = {
+        'Content-Type': MIME_BY_EXT[ext] || 'application/octet-stream',
+        // Content-addressed keys never change, so this is safe forever.
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'X-Content-Type-Options': 'nosniff',
+      };
+      if (obj.size) headers['Content-Length'] = obj.size;
+      res.writeHead(200, headers);
+      obj.stream.pipe(res);
+      obj.stream.on('error', () => res.destroy());
+      return;
     }
 
     /* ── workspace surfaces ── */

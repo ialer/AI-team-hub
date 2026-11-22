@@ -45,7 +45,7 @@ export class Hub {
    * Append a message, broadcast it, and wake whoever was mentioned.
    * @returns the stored message
    */
-  say({ room, from, text, refs = [], kind = 'chat', dialog = null, origin = 'user' }) {
+  say({ room, from, text, refs = [], images = [], kind = 'chat', dialog = null, origin = 'user' }) {
     const body = String(text || '').trim();
     if (!body && !dialog) throw new Error('empty message');
 
@@ -56,6 +56,7 @@ export class Hub {
       text: body,
       mentions,
       refs,
+      ...(images && images.length ? { images: images.slice(0, 8) } : {}),
       kind,
       origin,
       ...(dialog ? { dialog } : {}),

@@ -15,6 +15,20 @@
     "role": "操作者"
   },
 
+  "_comment_storage": "Media storage. driver=local writes to data/files. driver=r2 uses Cloudflare R2 (S3 API, zero-dependency SigV4). Secrets come from env via ${VAR} so they never land in git.",
+  "storage": {
+    "driver": "local",
+    "_r2_example": {
+      "driver": "r2",
+      "r2": {
+        "accountId": "${R2_ACCOUNT_ID}",
+        "bucket": "${R2_BUCKET}",
+        "accessKeyId": "${R2_ACCESS_KEY_ID}",
+        "secretAccessKey": "${R2_SECRET_ACCESS_KEY}",
+        "publicBaseUrl": "https://media.example.com"
+      }
+    }
+  },
   "_comment_agents": "mode=connector → the agent dials in and long-polls (recommended, NAT-friendly). mode=push → the hub calls out via an adapter.",
 
   "agents": [

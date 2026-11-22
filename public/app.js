@@ -19,6 +19,7 @@ const state = {
   busy: new Set(),
   lastId: 0,
   pendingRefs: [],
+  pendingImages: [],
   dialogs: {},
   panelOpen: localStorage.getItem('hub.panel') === '1',
   surface: 'docs',
@@ -44,6 +45,9 @@ const el = {
   panelFoot: $('#panelFoot'),
   panelToggle: $('#panelToggle'),
   pendingRefs: $('#pendingRefs'),
+  pendingImages: $('#pendingImages'),
+  attach: $('#attach'),
+  filePicker: $('#filePicker'),
 };
 
 /* ══════════════════════════════════════════════════════
@@ -127,6 +131,11 @@ export function renderMarkdown(raw) {
 
   const inline = (s) => escapeHtml(applyEmoji(s))
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    // Images before links, so ![alt](url) is not eaten by the link rule.
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) =>
+      /^https?:\/\/|^\/api\/file\//.test(src)
+        ? `<img class="inline-img" src="${src}" alt="${alt}" loading="lazy" decoding="async">`
+        : alt)
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
     .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
@@ -230,6 +239,7 @@ function messageEl(m) {
         <time class="time" datetime="${new Date(m.ts).toISOString()}">${timeOf(m.ts)}</time>
       </div>
       <div class="bubble">${renderMarkdown(m.text)}</div>
+      ${renderImages(m.images)}
       ${m.refs && m.refs.length ? `<div class="refs">${m.refs.map(refChip).join('')}</div>` : ''}
     </div>`;
 
@@ -241,6 +251,51 @@ function messageEl(m) {
 }
 
 const refChip = (r) => `<span class="ref">📎 ${escapeHtml(r.title || r.id || '')}</span>`;
+
+/**
+ * Structured image attachments on a message.
+ *
+ * Width/height are set when the upload told us the pixel size, so the browser
+ * reserves the box before the bytes arrive and the thread does not jump.
+ */
+function renderImages(images) {
+  if (!Array.isArray(images) || !images.length) return '';
+  const cells = images.slice(0, 8).map((img) => {
+    const url = String(img.url || '');
+    if (!/^https?:\/\/|^\/api\/file\//.test(url)) return '';
+    const dims = img.w && img.h ? ` width="${img.w}" height="${img.h}"` : '';
+    const ratio = img.w && img.h ? ` style="aspect-ratio:${img.w}/${img.h}"` : '';
+    return `<button type="button" class="img-cell" data-full="${escapeHtml(url)}"
+              aria-label="查看大图：${escapeHtml(img.alt || '')}">
+      <img src="${escapeHtml(url)}" alt="${escapeHtml(img.alt || '')}"
+           loading="lazy" decoding="async"${dims}${ratio}>
+    </button>`;
+  }).join('');
+  return `<div class="msg-images">${cells}</div>`;
+}
+
+/* Click to enlarge — native <dialog>, no lightbox library. */
+let zoomDialog = null;
+
+function ensureZoomDialog() {
+  if (zoomDialog) return zoomDialog;
+  zoomDialog = document.createElement('dialog');
+  zoomDialog.className = 'zoom-dialog';
+  zoomDialog.innerHTML = '<img alt=""><form method="dialog"><button class="btn">关闭</button></form>';
+  zoomDialog.addEventListener('click', (e) => {
+    if (e.target === zoomDialog) zoomDialog.close();
+  });
+  document.body.appendChild(zoomDialog);
+  return zoomDialog;
+}
+
+document.addEventListener('click', (e) => {
+  const cell = e.target.closest('.img-cell');
+  if (!cell) return;
+  const dlg = ensureZoomDialog();
+  dlg.querySelector('img').src = cell.dataset.full;
+  dlg.showModal();
+});
 
 /* ── dialog card ─────────────────────────────────────── */
 
@@ -622,6 +677,88 @@ function connectStream() {
 }
 
 /* ══════════════════════════════════════════════════════
+   Image upload — paste, drag & drop, or the attach button
+   ══════════════════════════════════════════════════════ */
+
+const MAX_IMAGES_PER_MESSAGE = 8;
+
+async function uploadImage(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    toast('只能上传图片');
+    return;
+  }
+  if (state.pendingImages.length >= MAX_IMAGES_PER_MESSAGE) {
+    toast(`一条消息最多 ${MAX_IMAGES_PER_MESSAGE} 张图`);
+    return;
+  }
+
+  const form = new FormData();
+  form.append('file', file, file.name || 'image');
+
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: form });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.status);
+    state.pendingImages.push({ url: j.url, alt: file.name || '', w: j.w, h: j.h });
+    renderPendingImages();
+  } catch (e) {
+    toast('上传失败：' + e.message);
+  }
+}
+
+function renderPendingImages() {
+  el.pendingImages.innerHTML = state.pendingImages.map((img, i) => `
+    <div class="pending-img" title="${escapeHtml(img.alt || '')}">
+      <img src="${escapeHtml(img.url)}" alt="" loading="lazy" decoding="async">
+      <button type="button" data-i="${i}" aria-label="移除图片">×</button>
+    </div>`).join('');
+}
+
+el.pendingImages.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-i]');
+  if (!btn) return;
+  state.pendingImages.splice(Number(btn.dataset.i), 1);
+  renderPendingImages();
+});
+
+/* Paste a screenshot straight into the composer. */
+el.input.addEventListener('paste', (e) => {
+  const items = [...(e.clipboardData?.items || [])];
+  const files = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'))
+    .map((it) => it.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) uploadImage(f);
+});
+
+/* Drag & drop onto the composer. */
+const composer = document.querySelector('.composer');
+['dragenter', 'dragover'].forEach((evt) =>
+  composer.addEventListener(evt, (e) => {
+    if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+    e.preventDefault();
+    composer.classList.add('dropping');
+  }));
+['dragleave', 'drop'].forEach((evt) =>
+  composer.addEventListener(evt, (e) => {
+    if (evt === 'dragleave' && composer.contains(e.relatedTarget)) return;
+    composer.classList.remove('dropping');
+  }));
+composer.addEventListener('drop', (e) => {
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  for (const f of files) uploadImage(f);
+});
+
+el.attach.addEventListener('click', () => el.filePicker.click());
+el.filePicker.addEventListener('change', () => {
+  for (const f of [...el.filePicker.files]) uploadImage(f);
+  el.filePicker.value = '';
+});
+
+/* ══════════════════════════════════════════════════════
    Send
    ══════════════════════════════════════════════════════ */
 
@@ -640,7 +777,11 @@ async function send() {
     const r = await fetch('/api/say', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room: state.room, from: state.me, text, refs: state.pendingRefs }),
+      body: JSON.stringify({
+        room: state.room, from: state.me, text,
+        refs: state.pendingRefs,
+        images: state.pendingImages,
+      }),
     });
     if (!r.ok) {
       toast('发送失败：' + ((await r.json()).error || r.status));
@@ -648,6 +789,8 @@ async function send() {
     }
     el.input.value = '';
     clearPendingRefs();
+    state.pendingImages = [];
+    renderPendingImages();
     autosize();
     el.input.focus();
   } catch (e) {

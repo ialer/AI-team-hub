@@ -55,9 +55,16 @@
 
   <footer>
     <div class="pending-refs" id="pendingRefs"></div>
+    <div class="pending-images" id="pendingImages"></div>
     <div class="composer">
       <div class="mention-pop" id="mentionPop" role="listbox" aria-label="选择要 @ 的成员"></div>
-      <textarea id="input" rows="1" placeholder="说点什么…  输入 @ 选择成员"
+      <button class="attach" id="attach" type="button" title="添加图片" aria-label="添加图片">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21.4 11.05 12.25 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.49-8.49"/>
+        </svg>
+      </button>
+      <input type="file" id="filePicker" accept="image/png,image/jpeg,image/gif,image/webp,image/avif" multiple hidden>
+      <textarea id="input" rows="1" placeholder="说点什么…  输入 @ 选择成员，: 选 emoji"
         autocomplete="off" autocapitalize="off" spellcheck="false"
         enterkeyhint="send" aria-autocomplete="list" aria-controls="mentionPop" aria-expanded="false"></textarea>
       <button class="send" id="send" title="发送" aria-label="发送">
@@ -65,8 +72,8 @@
       </button>
     </div>
     <div class="hint">
-      <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行 · <kbd>@</kbd> 选择成员</span>
-      <span>只有被 @ 的成员会被唤醒</span>
+      <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行 · <kbd>@</kbd> 成员 · <kbd>:</kbd> emoji</span>
+      <span>可粘贴或拖入图片</span>
     </div>
   </footer>
 

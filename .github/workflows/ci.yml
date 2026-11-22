@@ -44,6 +44,11 @@ jobs:
             node --check "$f"
           done
 
+      # Byte sniffing, image header parsing, multipart splitting and the AWS
+      # signature are all things you cannot verify by eye.
+      - name: Unit tests
+        run: npm test
+
       - name: Start hub and run a smoke test
         run: |
           cat > config.json <<'EOF'
