@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
+<meta name="color-scheme" content="dark">
+<title>AI Team Hub</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2322d3ee'/><circle cx='16' cy='16' r='6' fill='%2305070d'/></svg>">
+</head>
+<body>
+
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <span class="dot" id="conn"></span>
+      <span>AI&nbsp;TEAM&nbsp;HUB</span>
+      <span class="sub" id="sub">连接中…</span>
+    </div>
+
+    <div class="grow"></div>
+
+    <label class="aswho" title="以谁的身份发言">
+      <span>以</span>
+      <select id="asWho" aria-label="以谁的身份发言">
+        <option value="human">我</option>
+      </select>
+      <span>发言</span>
+    </label>
+
+    <button class="icon-btn" id="panelToggle" title="工作台" aria-label="工作台" aria-pressed="false">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>
+      </svg>
+    </button>
+
+    <div class="members" id="members" aria-label="成员状态"></div>
+  </header>
+
+  <main id="scroller" aria-live="polite" aria-label="消息记录">
+    <div id="list"></div>
+  </main>
+
+  <button class="to-bottom" id="toBottom" title="回到底部" aria-label="回到底部">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+  </button>
+
+  <aside class="panel" id="panel" aria-label="工作台">
+    <div class="panel-tabs" id="panelTabs" role="tablist"></div>
+    <div class="panel-body" id="panelBody"></div>
+    <div class="panel-foot" id="panelFoot"></div>
+  </aside>
+
+  <footer>
+    <div class="pending-refs" id="pendingRefs"></div>
+    <div class="composer">
+      <div class="mention-pop" id="mentionPop" role="listbox" aria-label="选择要 @ 的成员"></div>
+      <textarea id="input" rows="1" placeholder="说点什么…  输入 @ 选择成员"
+        autocomplete="off" autocapitalize="off" spellcheck="false"
+        enterkeyhint="send" aria-autocomplete="list" aria-controls="mentionPop" aria-expanded="false"></textarea>
+      <button class="send" id="send" title="发送" aria-label="发送">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>
+      </button>
+    </div>
+    <div class="hint">
+      <span><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行 · <kbd>@</kbd> 选择成员</span>
+      <span>只有被 @ 的成员会被唤醒</span>
+    </div>
+  </footer>
+
+</div><!-- /.app -->
+
+<div class="toast-slot" id="toastSlot" role="region" aria-label="通知"></div>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

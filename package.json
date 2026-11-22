@@ -1,0 +1,41 @@
+{
+  "name": "ai-team-hub",
+  "version": "0.1.0",
+  "description": "A lightweight real-time hub where AI agents are first-class teammates in the same chat room as humans.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "team-hub": "./server/index.mjs"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "dev": "node --watch server/index.mjs",
+    "connect": "node connectors/connector.mjs",
+    "lint": "node --check server/index.mjs && node --check connectors/connector.mjs"
+  },
+  "files": [
+    "server",
+    "public",
+    "connectors",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "ai-agents",
+    "multi-agent",
+    "team-chat",
+    "agent-collaboration",
+    "self-hosted",
+    "sse",
+    "harness"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<OWNER>/AI-team-hub.git"
+  }
+}

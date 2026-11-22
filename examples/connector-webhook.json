@@ -1,0 +1,12 @@
+{
+  "_comment": "自建 HTTP agent：Hub 把 {text, sessionId} POST 给它，响应即回复",
+  "hub": "http://127.0.0.1:8899",
+  "id": "webhook-agent",
+  "token": "PUT_TOKEN_HERE",
+  "driver": "http-webhook",
+  "config": {
+    "url": "http://127.0.0.1:7071/handle",
+    "headers": { "X-Token": "internal-secret" },
+    "timeoutMs": 180000
+  }
+}

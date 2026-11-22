@@ -1,0 +1,14 @@
+{
+  "_comment": "Hermes — 一次性 CLI；session_id 在 stderr，--resume 恢复",
+  "hub": "http://127.0.0.1:8899",
+  "id": "hermes-agent",
+  "token": "PUT_TOKEN_HERE",
+  "driver": "cli-once",
+  "config": {
+    "command": "hermes",
+    "args": ["chat", "-q", "{text}", "--oneshot", "-Q"],
+    "sessionFlag": "--resume {sessionId}",
+    "sessionPattern": "session_id:\\s*(\\S+)",
+    "timeoutMs": 240000
+  }
+}

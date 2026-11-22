@@ -1,0 +1,13 @@
+{
+  "_comment": "DeepSeek Harness headless — NDJSON 事件流，能拿到 sessionId",
+  "hub": "http://127.0.0.1:8899",
+  "id": "dsh-agent",
+  "token": "PUT_TOKEN_HERE",
+  "driver": "cli-json",
+  "config": {
+    "command": "dsh",
+    "args": ["--profile", "headless", "--json", "{text}"],
+    "sessionFlag": "--session-id {sessionId}",
+    "timeoutMs": 240000
+  }
+}

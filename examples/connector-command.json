@@ -1,0 +1,11 @@
+{
+  "_comment": "万能兜底：跑任意命令，stdout 即回复（跨平台，自动选 shell）",
+  "hub": "http://127.0.0.1:8899",
+  "id": "script-agent",
+  "token": "PUT_TOKEN_HERE",
+  "driver": "command",
+  "config": {
+    "command": "python3 ~/agent.py",
+    "timeoutMs": 120000
+  }
+}

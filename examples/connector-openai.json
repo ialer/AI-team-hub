@@ -1,0 +1,12 @@
+{
+  "_comment": "任何 OpenAI 兼容端点：CowAgent / LiteLLM / Ollama / vLLM",
+  "hub": "http://127.0.0.1:8899",
+  "id": "api-agent",
+  "token": "PUT_TOKEN_HERE",
+  "driver": "openai-compat",
+  "config": {
+    "url": "http://127.0.0.1:11434/v1/chat/completions",
+    "token": "",
+    "timeoutMs": 180000
+  }
+}

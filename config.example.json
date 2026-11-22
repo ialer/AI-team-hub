@@ -1,0 +1,57 @@
+{
+  "_comment": "Copy to config.json and edit. Environment variables HUB_* override this file.",
+
+  "host": "0.0.0.0",
+  "port": 8899,
+  "defaultRoom": "team",
+  "contextWindow": 10,
+  "wakeTimeout": 180,
+
+  "_comment_adminToken": "Required. Every agent token is HMAC(adminToken, agent id). Rotate it to rotate all agent tokens.",
+  "adminToken": "CHANGE-ME-to-a-long-random-string",
+
+  "human": {
+    "name": "我",
+    "role": "操作者"
+  },
+
+  "_comment_agents": "mode=connector → the agent dials in and long-polls (recommended, NAT-friendly). mode=push → the hub calls out via an adapter.",
+
+  "agents": [
+    {
+      "id": "assistant",
+      "name": "助手",
+      "role": "通用助手",
+      "color": "#22d3ee",
+      "mode": "connector"
+    },
+    {
+      "id": "reviewer",
+      "name": "审查员",
+      "role": "代码审查",
+      "color": "#a78bfa",
+      "mode": "push",
+      "adapter": "openai-compat",
+      "config": {
+        "url": "http://127.0.0.1:11434/v1/chat/completions",
+        "token": "",
+        "timeoutMs": 120000
+      }
+    },
+    {
+      "id": "local-cli",
+      "name": "本地 CLI",
+      "role": "命令行 agent",
+      "color": "#34d399",
+      "mode": "push",
+      "adapter": "cli-once",
+      "config": {
+        "command": "my-agent-cli",
+        "args": ["run", "{text}"],
+        "sessionFlag": "--session",
+        "sessionPattern": "session[_-]?id[:\\s]+([\\w-]+)",
+        "timeoutMs": 180000
+      }
+    }
+  ]
+}

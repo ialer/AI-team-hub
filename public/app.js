@@ -1,0 +1,685 @@
+/**
+ * AI Team Hub — browser client.
+ *
+ * Plain ES modules, no framework, no build. Three concerns kept apart:
+ *   renderMarkdown()  text → safe HTML
+ *   MessageView       one message → DOM
+ *   store / stream    fetch + SSE, the only places that talk to the network
+ */
+
+/* ══════════════════════════════════════════════════════
+   State
+   ══════════════════════════════════════════════════════ */
+
+const state = {
+  me: localStorage.getItem('hub.identity') || 'human',
+  room: 'team',
+  agents: {},
+  human: { id: 'human', name: '我', role: '操作者', color: '#e2e8f0' },
+  busy: new Set(),
+  lastId: 0,
+  pendingRefs: [],
+  dialogs: {},
+  panelOpen: localStorage.getItem('hub.panel') === '1',
+  surface: 'docs',
+};
+
+const $ = (sel) => document.querySelector(sel);
+const el = {
+  app: $('.app'),
+  list: $('#list'),
+  scroller: $('#scroller'),
+  input: $('#input'),
+  send: $('#send'),
+  members: $('#members'),
+  conn: $('#conn'),
+  sub: $('#sub'),
+  toBottom: $('#toBottom'),
+  toastSlot: $('#toastSlot'),
+  pop: $('#mentionPop'),
+  asWho: $('#asWho'),
+  panel: $('#panel'),
+  panelTabs: $('#panelTabs'),
+  panelBody: $('#panelBody'),
+  panelFoot: $('#panelFoot'),
+  panelToggle: $('#panelToggle'),
+  pendingRefs: $('#pendingRefs'),
+};
+
+/* ══════════════════════════════════════════════════════
+   Markdown (escape first, then a small subset)
+   ══════════════════════════════════════════════════════ */
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+export function renderMarkdown(raw) {
+  const src = String(raw || '').replace(/\r\n/g, '\n');
+
+  // Protect fenced code blocks from inline rules.
+  const blocks = [];
+  const stripped = src.replace(/```([\w-]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    blocks.push({ lang: lang || '', code });
+    return `\u0000B${blocks.length - 1}\u0000`;
+  });
+
+  const inline = (s) => escapeHtml(s)
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/@([\p{L}\p{N}_-]+)/gu, '<span class="mention">@$1</span>');
+
+  const out = [];
+  let list = null;
+  let quote = [];
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const flushQuote = () => {
+    if (quote.length) { out.push(`<blockquote>${quote.map(inline).join('<br>')}</blockquote>`); quote = []; }
+  };
+
+  for (const line of stripped.split('\n')) {
+    const ref = line.match(/^\u0000B(\d+)\u0000$/);
+
+    if (ref) {
+      closeList(); flushQuote();
+      const b = blocks[Number(ref[1])];
+      const cls = b.lang ? ` class="lang-${escapeHtml(b.lang)}"` : '';
+      out.push(`<pre><code${cls}>${escapeHtml(b.code)}</code></pre>`);
+      continue;
+    }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { closeList(); flushQuote(); const lv = Math.min(h[1].length + 3, 6); out.push(`<h${lv}>${inline(h[2])}</h${lv}>`); continue; }
+
+    if (/^\s*>\s?/.test(line)) { closeList(); quote.push(line.replace(/^\s*>\s?/, '')); continue; }
+    flushQuote();
+
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ul) { if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul'; } out.push(`<li>${inline(ul[1])}</li>`); continue; }
+    if (ol) { if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol'; } out.push(`<li>${inline(ol[1])}</li>`); continue; }
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { closeList(); out.push('<hr>'); continue; }
+    if (!line.trim()) { closeList(); continue; }
+
+    closeList();
+    out.push(`<p>${inline(line)}</p>`);
+  }
+  closeList(); flushQuote();
+  return out.join('');
+}
+
+/* ══════════════════════════════════════════════════════
+   Helpers
+   ══════════════════════════════════════════════════════ */
+
+const timeOf = (ts) =>
+  new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+function whoOf(id) {
+  if (id === 'human') return state.human;
+  if (id === 'system') return { name: '系统', role: '', color: '#f87171' };
+  return state.agents[id] || { name: id, role: '', color: '#7f8fa8' };
+}
+
+function toast(text) {
+  const node = document.createElement('div');
+  node.className = 'toast';
+  node.setAttribute('popover', 'manual');
+  node.textContent = text;
+  el.toastSlot.appendChild(node);
+  try { node.showPopover(); } catch { /* older browsers */ }
+  setTimeout(() => { try { node.hidePopover(); } catch {} node.remove(); }, 4200);
+}
+
+function scrollIfNearBottom() {
+  const gap = el.scroller.scrollHeight - el.scroller.scrollTop - el.scroller.clientHeight;
+  if (gap < 220) el.scroller.scrollTop = el.scroller.scrollHeight;
+}
+
+/* ══════════════════════════════════════════════════════
+   Message rendering
+   ══════════════════════════════════════════════════════ */
+
+function messageEl(m) {
+  const who = whoOf(m.from);
+  const initial = (who.name || '?').slice(0, 1).toUpperCase();
+
+  const article = document.createElement('article');
+  article.className = 'msg'
+    + (m.from === 'human' ? ' from-human' : '')
+    + (m.from === 'system' ? ' from-system' : '');
+  article.id = 'm' + m.id;
+
+  article.innerHTML = `
+    <div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(initial)}</div>
+    <div class="body">
+      <div class="meta">
+        <span class="who" style="--c:${who.color}">${escapeHtml(who.name)}</span>
+        <span class="role">${escapeHtml(who.role || '')}</span>
+        <time class="time" datetime="${new Date(m.ts).toISOString()}">${timeOf(m.ts)}</time>
+      </div>
+      <div class="bubble">${renderMarkdown(m.text)}</div>
+      ${m.refs && m.refs.length ? `<div class="refs">${m.refs.map(refChip).join('')}</div>` : ''}
+    </div>`;
+
+  if (m.dialog) {
+    const live = state.dialogs[m.dialog.id] || m.dialog;
+    article.querySelector('.body').appendChild(dialogCard(live));
+  }
+  return article;
+}
+
+const refChip = (r) => `<span class="ref">📎 ${escapeHtml(r.title || r.id || '')}</span>`;
+
+/* ── dialog card ─────────────────────────────────────── */
+
+function dialogCard(dialog) {
+  const card = document.createElement('div');
+  const status = dialog.status || 'open';
+  card.className = 'dialog-card' + (status !== 'open' ? ' done' : '');
+  card.dataset.dialogId = dialog.id;
+
+  const steps = dialog.steps || [];
+  let index = 0;
+  const values = { ...(dialog.values || {}) };
+
+  const head = document.createElement('div');
+  head.className = 'dialog-head';
+  head.innerHTML = `<span>${escapeHtml(dialog.title || '请填写')}</span>
+    <span class="dialog-step-no"></span>`;
+  card.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'dialog-body';
+  card.appendChild(body);
+
+  const foot = document.createElement('div');
+  foot.className = 'dialog-foot';
+  card.appendChild(foot);
+
+  if (status !== 'open') {
+    body.innerHTML = `<div class="hint">${
+      status === 'submitted' ? '✅ 已提交' : '已取消'
+    }</div>`;
+    return card;
+  }
+
+  const stepNo = head.querySelector('.dialog-step-no');
+
+  function renderStep() {
+    const step = steps[index];
+    stepNo.textContent = `${index + 1}/${steps.length}`;
+    body.innerHTML = '';
+    body.appendChild(fieldFor(step, values[step.id]));
+    foot.innerHTML = '';
+
+    if (index > 0) {
+      foot.appendChild(button('上一步', () => { index--; renderStep(); }));
+    }
+    foot.appendChild(button('取消', submitCancel, 'ghost'));
+
+    const isLast = index === steps.length - 1;
+    const next = button(isLast ? '提交' : '下一步', () => {
+      if (!collect(step)) return;
+      if (isLast) submitDialog();
+      else { index++; renderStep(); }
+    }, 'primary');
+    foot.appendChild(next);
+    body.querySelector('input, textarea, select')?.focus({ preventScroll: true });
+  }
+
+  function collect(step) {
+    const input = body.querySelector(`[data-field="${step.id}"]`);
+    if (!input) return true;
+    let v;
+    if (step.type === 'checkbox') v = input.checked;
+    else v = input.value.trim();
+
+    const err = body.querySelector('.err');
+    if (err) err.remove();
+
+    if (step.required && (v === '' || v === false || v === undefined)) {
+      const p = document.createElement('div');
+      p.className = 'err';
+      p.textContent = '此项必填';
+      input.closest('.field').appendChild(p);
+      input.focus();
+      return false;
+    }
+    if (step.type === 'number' && v !== '') {
+      const n = Number(v);
+      if (Number.isNaN(n)) {
+        const p = document.createElement('div');
+        p.className = 'err';
+        p.textContent = '请填数字';
+        input.closest('.field').appendChild(p);
+        return false;
+      }
+      v = n;
+    }
+    values[step.id] = v;
+    return true;
+  }
+
+  async function submitDialog() {
+    try {
+      const r = await fetch(`/api/dialogs/${encodeURIComponent(dialog.id)}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || r.status);
+    } catch (e) {
+      toast('提交失败：' + e.message);
+    }
+  }
+
+  async function submitCancel() {
+    try {
+      await fetch(`/api/dialogs/${encodeURIComponent(dialog.id)}/cancel`, { method: 'POST' });
+    } catch { /* the stream will tell us */ }
+  }
+
+  renderStep();
+  return card;
+}
+
+function fieldFor(step, value) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  const id = `f-${step.id}`;
+  const label = `<label for="${id}">${escapeHtml(step.label || step.id)}${step.required ? ' <span class="req">*</span>' : ''}</label>`;
+
+  if (step.type === 'select') {
+    const opts = (step.options || []).map((o) => {
+      const v = typeof o === 'string' ? o : o.value;
+      const t = typeof o === 'string' ? o : o.label;
+      return `<option value="${escapeHtml(v)}"${String(value) === String(v) ? ' selected' : ''}>${escapeHtml(t)}</option>`;
+    }).join('');
+    wrap.innerHTML = `${label}<select id="${id}" data-field="${escapeHtml(step.id)}">${opts}</select>`;
+  } else if (step.type === 'checkbox') {
+    wrap.innerHTML = `<label class="check"><input type="checkbox" id="${id}" data-field="${escapeHtml(step.id)}"${value ? ' checked' : ''}> ${escapeHtml(step.label || step.id)}${step.required ? ' <span class="req">*</span>' : ''}</label>`;
+  } else if (step.type === 'textarea') {
+    wrap.innerHTML = `${label}<textarea id="${id}" data-field="${escapeHtml(step.id)}" rows="3">${escapeHtml(value || '')}</textarea>`;
+  } else {
+    const type = step.type === 'number' ? 'number' : 'text';
+    wrap.innerHTML = `${label}<input type="${type}" id="${id}" data-field="${escapeHtml(step.id)}" value="${escapeHtml(value ?? step.default ?? '')}" placeholder="${escapeHtml(step.placeholder || '')}">`;
+  }
+  if (step.hint) wrap.insertAdjacentHTML('beforeend', `<div class="hint">${escapeHtml(step.hint)}</div>`);
+  return wrap;
+}
+
+function button(text, onClick, kind) {
+  const b = document.createElement('button');
+  b.className = 'btn' + (kind ? ' ' + kind : '');
+  b.type = 'button';
+  b.textContent = text;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+/* ══════════════════════════════════════════════════════
+   Members / presence
+   ══════════════════════════════════════════════════════ */
+
+function renderMembers() {
+  const order = Object.keys(state.agents);
+  el.members.innerHTML = order.map((id) => {
+    const a = state.agents[id];
+    const cls = a.online === true ? 'on' : a.online === false ? 'off' : 'unknown';
+    const busy = state.busy.has(id) ? ' busy' : '';
+    const title = `${a.name} · ${a.online ? '在线' : a.online === false ? '离线' : '未知'}${a.mode === 'push' ? ' · push' : ''}`;
+    return `<span class="chip ${cls}${busy}" style="--c:${a.color}" title="${escapeHtml(title)}">
+      <span class="av"></span>${escapeHtml(a.name)}
+    </span>`;
+  }).join('');
+}
+
+/* ══════════════════════════════════════════════════════
+   @ mention autocomplete
+   ══════════════════════════════════════════════════════ */
+
+let pop = { open: false, items: [], index: 0 };
+
+function mentionCandidates(query) {
+  const all = [{ id: 'all', name: '全体成员', role: '唤醒所有人', color: '#22d3ee', isAll: true }];
+  for (const [id, a] of Object.entries(state.agents)) {
+    if (a.enabled === false) continue;
+    all.push({ id, name: a.name, role: a.role || '', color: a.color, isAll: false });
+  }
+  const q = query.toLowerCase();
+  return all.filter((c) => !q || c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+}
+
+function showPop(query) {
+  pop.items = mentionCandidates(query);
+  if (!pop.items.length) return hidePop();
+  pop.open = true;
+  pop.index = 0;
+  renderPop();
+  el.pop.classList.add('show');
+  el.input.setAttribute('aria-expanded', 'true');
+}
+
+function hidePop() {
+  pop.open = false;
+  pop.items = [];
+  el.pop.classList.remove('show');
+  el.input.setAttribute('aria-expanded', 'false');
+}
+
+function renderPop() {
+  el.pop.innerHTML = pop.items.map((c, i) => `
+    <div class="mention-item" role="option" data-i="${i}" aria-selected="${i === pop.index}" style="--c:${c.color}">
+      <span class="av" aria-hidden="true">${escapeHtml(c.isAll ? '全' : c.name.slice(0, 1))}</span>
+      <span class="nm">${escapeHtml(c.name)}</span>
+      <span class="rl">${escapeHtml(c.role)}</span>
+    </div>`).join('');
+  el.pop.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+}
+
+function applyMention(candidate) {
+  const v = el.input.value;
+  const caret = el.input.selectionStart;
+  const before = v.slice(0, caret);
+  const at = before.lastIndexOf('@');
+  if (at < 0) return hidePop();
+  const insert = `@${candidate.name} `;
+  el.input.value = before.slice(0, at) + insert + v.slice(caret);
+  const pos = at + insert.length;
+  el.input.setSelectionRange(pos, pos);
+  hidePop();
+  el.input.focus();
+}
+
+function detectMention() {
+  const caret = el.input.selectionStart;
+  const before = el.input.value.slice(0, caret);
+  const at = before.lastIndexOf('@');
+  if (at < 0) return hidePop();
+  const seg = before.slice(at + 1);
+  if (/[\s\n]/.test(seg) || seg.length > 12) return hidePop();
+  showPop(seg);
+}
+
+el.pop.addEventListener('pointerdown', (e) => {
+  const item = e.target.closest('.mention-item');
+  if (!item) return;
+  e.preventDefault();
+  applyMention(pop.items[Number(item.dataset.i)]);
+});
+
+/* ══════════════════════════════════════════════════════
+   Network
+   ══════════════════════════════════════════════════════ */
+
+async function loadDialogs() {
+  try {
+    const r = await fetch('/api/dialogs');
+    const j = await r.json();
+    state.dialogs = j.dialogs || {};
+  } catch { /* panel still works */ }
+}
+
+async function loadState() {
+  const r = await fetch('/api/state');
+  const j = await r.json();
+  state.agents = j.agents || {};
+  state.human = j.human || state.human;
+  state.room = j.defaultRoom || 'team';
+  state.busy = new Set(j.busy || []);
+  state.lastId = j.lastId || 0;
+  await loadDialogs();
+  renderMembers();
+}
+
+async function loadHistory() {
+  const r = await fetch(`/api/messages?room=${encodeURIComponent(state.room)}&after=0`);
+  const j = await r.json();
+  el.list.innerHTML = '';
+  if (!j.messages.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = '// 还没有消息，说第一句话试试';
+    el.list.appendChild(e);
+  } else {
+    for (const m of j.messages) {
+      el.list.appendChild(messageEl(m));
+      if (m.id > state.lastId) state.lastId = m.id;
+    }
+  }
+  requestAnimationFrame(() => { el.scroller.scrollTop = el.scroller.scrollHeight; });
+}
+
+function appendMessage(m) {
+  if (document.getElementById('m' + m.id)) return;
+  el.list.querySelector('.empty')?.remove();
+  if (m.id > state.lastId) state.lastId = m.id;
+  el.list.appendChild(messageEl(m));
+  scrollIfNearBottom();
+}
+
+function connectStream() {
+  const es = new EventSource('/api/stream');
+
+  es.addEventListener('open', () => {
+    el.conn.classList.remove('off');
+    el.sub.textContent = '已连接 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  });
+  es.addEventListener('error', () => {
+    el.conn.classList.add('off');
+    el.sub.textContent = '连接断开，重连中…';
+  });
+
+  es.addEventListener('message', (e) => appendMessage(JSON.parse(e.data)));
+
+  es.addEventListener('presence', (e) => {
+    const { agents } = JSON.parse(e.data);
+    if (agents) { state.agents = agents; renderMembers(); }
+  });
+
+  es.addEventListener('typing', (e) => {
+    const { who, on } = JSON.parse(e.data);
+    if (on) state.busy.add(who); else state.busy.delete(who);
+    renderMembers();
+
+    let node = document.getElementById('typing-' + who);
+    if (on) {
+      if (!node) {
+        const a = whoOf(who);
+        node = document.createElement('div');
+        node.className = 'typing on';
+        node.id = 'typing-' + who;
+        node.innerHTML = `<span style="--c:${a.color}">${escapeHtml(a.name)}</span> 正在处理
+          <span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>`;
+        el.list.appendChild(node);
+        scrollIfNearBottom();
+      }
+    } else {
+      node?.remove();
+    }
+  });
+
+  es.addEventListener('dialog', (e) => {
+    const d = JSON.parse(e.data);
+    state.dialogs[d.id] = d;
+    const card = document.querySelector(`.dialog-card[data-dialog-id="${d.id}"]`);
+    if (!card) return;
+    const fresh = dialogCard(d);
+    card.replaceWith(fresh);
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   Send
+   ══════════════════════════════════════════════════════ */
+
+function autosize() {
+  if (!CSS.supports('field-sizing', 'content')) {
+    el.input.style.height = 'auto';
+    el.input.style.height = Math.min(el.input.scrollHeight, 140) + 'px';
+  }
+}
+
+async function send() {
+  const text = el.input.value.trim();
+  if (!text) return;
+  el.send.disabled = true;
+  try {
+    const r = await fetch('/api/say', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: state.room, from: state.me, text, refs: state.pendingRefs }),
+    });
+    if (!r.ok) {
+      toast('发送失败：' + ((await r.json()).error || r.status));
+      return;
+    }
+    el.input.value = '';
+    clearPendingRefs();
+    autosize();
+    el.input.focus();
+  } catch (e) {
+    toast('网络错误：' + e.message);
+  } finally {
+    el.send.disabled = false;
+  }
+}
+
+function clearPendingRefs() {
+  state.pendingRefs = [];
+  el.pendingRefs.innerHTML = '';
+}
+
+function addPendingRef(ref) {
+  if (state.pendingRefs.some((r) => r.id === ref.id && r.surface === ref.surface)) return;
+  state.pendingRefs.push(ref);
+  const chip = document.createElement('span');
+  chip.className = 'pending-ref';
+  chip.innerHTML = `📎 ${escapeHtml(ref.title || ref.id)} <button type="button" title="移除">×</button>`;
+  chip.querySelector('button').addEventListener('click', () => {
+    state.pendingRefs = state.pendingRefs.filter((r) => r !== ref);
+    chip.remove();
+  });
+  el.pendingRefs.appendChild(chip);
+  el.input.focus();
+}
+
+/* ══════════════════════════════════════════════════════
+   Workspace panel
+   ══════════════════════════════════════════════════════ */
+
+const SURFACES = [
+  { id: 'docs', label: '文档' },
+  { id: 'tasks', label: '任务' },
+  { id: 'files', label: '文件' },
+];
+
+async function renderPanel() {
+  el.panelTabs.innerHTML = SURFACES.map((s) =>
+    `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}">${s.label}</button>`
+  ).join('');
+
+  el.panelBody.innerHTML = '<div class="empty" style="padding:24px">加载中…</div>';
+  el.panelFoot.textContent = '点条目可加入下一条消息';
+
+  try {
+    const r = await fetch(`/api/surface/${state.surface}`);
+    if (!r.ok) throw new Error(r.status);
+    const { items } = await r.json();
+    if (!items || !items.length) {
+      el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// ${state.surface} 还没有内容</div>`;
+      return;
+    }
+    el.panelBody.innerHTML = items.map((it) => `
+      <div class="surface-item" data-id="${escapeHtml(it.id)}" data-title="${escapeHtml(it.title || it.id)}" role="button" tabindex="0">
+        <span class="t">${escapeHtml(it.title || it.id)}</span>
+        <span class="m">${escapeHtml(it.meta || '')}</span>
+      </div>`).join('');
+  } catch {
+    el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// 该 surface 暂不可用</div>`;
+  }
+}
+
+el.panelTabs.addEventListener('click', (e) => {
+  const btn = e.target.closest('.panel-tab');
+  if (!btn) return;
+  state.surface = btn.dataset.surface;
+  renderPanel();
+});
+
+el.panelBody.addEventListener('click', (e) => {
+  const item = e.target.closest('.surface-item');
+  if (!item) return;
+  addPendingRef({ surface: state.surface, id: item.dataset.id, title: item.dataset.title });
+});
+
+function togglePanel(force) {
+  state.panelOpen = force !== undefined ? force : !state.panelOpen;
+  el.app.classList.toggle('with-panel', state.panelOpen);
+  el.panelToggle.classList.toggle('active', state.panelOpen);
+  localStorage.setItem('hub.panel', state.panelOpen ? '1' : '0');
+  if (state.panelOpen) renderPanel();
+}
+
+/* ══════════════════════════════════════════════════════
+   Wiring
+   ══════════════════════════════════════════════════════ */
+
+el.send.addEventListener('click', send);
+
+el.input.addEventListener('keydown', (e) => {
+  if (pop.open && pop.items.length) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); pop.index = (pop.index + 1) % pop.items.length; renderPop(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); pop.index = (pop.index - 1 + pop.items.length) % pop.items.length; renderPop(); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyMention(pop.items[pop.index]); return; }
+    if (e.key === 'Escape') { e.preventDefault(); hidePop(); return; }
+  }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    send();
+  }
+});
+
+el.input.addEventListener('input', () => { detectMention(); autosize(); });
+el.input.addEventListener('click', detectMention);
+el.input.addEventListener('blur', () => setTimeout(hidePop, 120));
+
+el.asWho.value = state.me;
+el.asWho.addEventListener('change', () => {
+  state.me = el.asWho.value;
+  localStorage.setItem('hub.identity', state.me);
+});
+
+el.panelToggle.addEventListener('click', () => togglePanel());
+
+el.toBottom.addEventListener('click', () => el.scroller.scrollTo({ top: el.scroller.scrollHeight, behavior: 'smooth' }));
+
+if (!CSS.supports('container-type', 'scroll-state')) {
+  el.scroller.addEventListener('scroll', () => {
+    const away = el.scroller.scrollTop < el.scroller.scrollHeight - el.scroller.clientHeight - 120;
+    el.toBottom.classList.toggle('show', away);
+  }, { passive: true });
+}
+
+/* ── boot ── */
+(async () => {
+  await loadState();
+  await loadHistory();
+  connectStream();
+  if (state.panelOpen) togglePanel(true);
+  el.input.focus();
+
+  // Slow refresh: presence is pushed via SSE, but a poll also covers a missed event.
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/state');
+      const j = await r.json();
+      state.agents = j.agents || state.agents;
+      state.busy = new Set(j.busy || []);
+      renderMembers();
+    } catch { /* offline */ }
+  }, 15000);
+})();

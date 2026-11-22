@@ -1,0 +1,22 @@
+# Local configuration and secrets
+config.json
+.env
+connector.json
+*.local.json
+
+# Runtime data (messages, sessions, dialogs, docs, files)
+data/
+
+# Logs
+*.log
+
+# Node
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
