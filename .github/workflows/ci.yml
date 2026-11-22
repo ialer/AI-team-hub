@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint + smoke test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # No dependencies to install — that is the point. If this step ever
+      # becomes necessary, something has gone wrong with the design.
+      - name: Verify zero runtime dependencies
+        run: |
+          node -e "
+            const p = require('./package.json');
+            const deps = Object.keys(p.dependencies || {});
+            if (deps.length) {
+              console.error('runtime dependencies are not allowed:', deps);
+              process.exit(1);
+            }
+            console.log('ok: zero runtime dependencies');
+          "
+
+      - name: Syntax check
+        run: |
+          for f in $(find server connectors -name '*.mjs'); do
+            node --check "$f"
+          done
+
+      - name: Start hub and run a smoke test
+        run: |
+          cat > config.json <<'EOF'
+          {
+            "host": "127.0.0.1",
+            "port": 8899,
+            "adminToken": "ci-test-token",
+            "wakeTimeout": 30,
+            "agents": [
+              {
+                "id": "echo",
+                "name": "echo",
+                "mode": "push",
+                "adapter": "cli-once",
+                "config": {
+                  "command": "node",
+                  "args": ["-e", "console.log('pong')"],
+                  "timeoutMs": 15000
+                }
+              },
+              { "id": "lp", "name": "lp", "mode": "connector" }
+            ]
+          }
+          EOF
+
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+
+          # 1. state endpoint answers
+          curl -sf http://127.0.0.1:8899/api/state > /dev/null
+
+          # 2. tokens are deterministic
+          T1=$(node server/tokens.mjs lp)
+          T2=$(node server/tokens.mjs lp)
+          [ "$T1" = "$T2" ] || { echo "token not deterministic"; exit 1; }
+          [ -n "$T1" ] || { echo "token empty"; exit 1; }
+
+          # 3. push adapter round trip
+          curl -sf -X POST http://127.0.0.1:8899/api/say \
+            -H 'Content-Type: application/json' \
+            -d '{"room":"team","from":"human","text":"@echo ping"}' > /dev/null
+          sleep 2
+
+          REPLY=$(curl -sf "http://127.0.0.1:8899/api/messages?room=team" \
+                  | node -e "
+                      let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                        const m=JSON.parse(s).messages.find(x=>x.from==='echo');
+                        process.stdout.write(m?m.text:'');
+                      });")
+          [ "$REPLY" = "pong" ] || { echo "unexpected reply: [$REPLY]"; exit 1; }
+          echo "smoke test passed"
+
+      - name: Static assets are served
+        run: |
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+          for p in / /style.css /app.js; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8899$p")
+            [ "$code" = "200" ] || { echo "$p returned $code"; exit 1; }
+          done
+          echo "static assets ok"
