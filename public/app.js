@@ -47,6 +47,68 @@ const el = {
 };
 
 /* ══════════════════════════════════════════════════════
+   Emoji
+   A small curated set — a full Unicode table is ~30 KB and buys
+   nothing but rare glyphs nobody types.
+   ══════════════════════════════════════════════════════ */
+
+const EMOJI = {
+  smile: '😄', grin: '😁', joy: '😂', rofl: '🤣', wink: '😉', blush: '😊',
+  heart_eyes: '😍', thinking: '🤔', neutral: '😐', confused: '😕', worried: '😟',
+  cry: '😢', sob: '😭', angry: '😠', rage: '😡', scream: '😱', sleepy: '😴',
+  sunglasses: '😎', nerd: '🤓', shush: '🤫', shrug: '🤷', facepalm: '🤦',
+  wink2: '😜', party_face: '🥳', cool: '😏', upside_down: '🙃', robot: '🤖',
+  thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎', ok_hand: '👌',
+  clap: '👏', pray: '🙏', wave: '👋', point_right: '👉', point_left: '👈',
+  muscle: '💪', handshake: '🤝', writing: '✍️', eyes: '👀', brain: '🧠',
+  heart: '❤️', broken_heart: '💔', sparkling_heart: '💖', fire: '🔥',
+  star: '⭐', sparkles: '✨', zap: '⚡', boom: '💥', '100': '💯',
+  rocket: '🚀', tada: '🎉', gift: '🎁', trophy: '🏆', medal: '🏅',
+  bell: '🔔', bulb: '💡', wrench: '🔧', hammer: '🔨', gear: '⚙️',
+  hammer_and_wrench: '🛠️', package: '📦', link: '🔗', lock: '🔒', unlock: '🔓',
+  key: '🔑', shield: '🛡️', bug: '🐛', worm: '🪱', sparkle: '✨',
+  check: '✅', white_check_mark: '✅', x: '❌', warning: '⚠️', no_entry: '⛔',
+  question: '❓', exclamation: '❗', plus: '➕', minus: '➖', arrow_right: '➡️',
+  arrow_left: '⬅️', arrow_up: '⬆️', arrow_down: '⬇️', recycle: '♻️', infinity: '♾️',
+  clock: '🕐', hourglass: '⏳', calendar: '📅', alarm_clock: '⏰', stopwatch: '⏱️',
+  chart: '📊', chart_up: '📈', chart_down: '📉', clipboard: '📋', memo: '📝',
+  book: '📖', books: '📚', notebook: '📓', page: '📄', folder: '📁',
+  file_folder: '📂', pushpin: '📌', paperclip: '📎', scissors: '✂️', ruler: '📏',
+  computer: '💻', desktop: '🖥️', keyboard: '⌨️', mouse: '🖱️', printer: '🖨️',
+  phone: '📱', battery: '🔋', plug: '🔌', satellite: '📡', wifi: '📶',
+  cloud: '☁️', database: '🗄️', floppy: '💾', cd: '💿', dvd: '📀',
+  terminal: '💻', gear2: '⚙️', robot2: '🤖', alien: '👽', ghost: '👻',
+  cat: '🐱', dog: '🐶', fox: '🦊', wolf: '🐺', bear: '🐻', panda: '🐼',
+  penguin: '🐧', bird: '🐦', fish: '🐟', whale: '🐳', dolphin: '🐬', crab: '🦀',
+  coffee: '☕', tea: '🍵', beer: '🍺', pizza: '🍕', cake: '🍰', cookie: '🍪',
+  apple: '🍎', lemon: '🍋', avocado: '🥑', bread: '🍞', ramen: '🍜',
+  sun: '☀️', moon: '🌙', cloud_rain: '🌧️', snowflake: '❄️', rainbow: '🌈',
+  earth: '🌍', globe: '🌐', map: '🗺️', compass: '🧭', anchor: '⚓',
+  hourglass_done: '⌛', magic: '🪄', crystal_ball: '🔮', dice: '🎲', puzzle: '🧩',
+  speech: '💬', thought: '💭', mail: '📧', envelope: '✉️', inbox: '📥', outbox: '📤',
+  megaphone: '📢', loudspeaker: '📣', mute: '🔇', sound: '🔊', music: '🎵',
+  camera: '📷', video: '📹', film: '🎬', art: '🎨', palette: '🎨',
+  pencil: '✏️', pen: '🖊️', crayon: '🖍️', paintbrush: '🖌️', magnet: '🧲',
+  flask: '🧪', dna: '🧬', microbe: '🦠', microscope: '🔬', telescope: '🔭',
+  atom: '⚛️', radioactive: '☢️', battery_low: '🪫', candle: '🕯️', lantern: '🏮',
+  house: '🏠', office: '🏢', factory: '🏭', tent: '⛺', bridge: '🌉',
+  car: '🚗', bus: '🚌', train: '🚆', plane: '✈️', ship: '🚢', bike: '🚲',
+  hourglass2: '⏳', flag: '🏁', checkered_flag: '🏁', construction: '🚧',
+  sos: '🆘', info: 'ℹ️', new: '🆕', free: '🆓', cool2: '🆒', up: '🆙',
+};
+
+const EMOJI_NAMES = Object.keys(EMOJI);
+const EMOJI_CODES = new Set(EMOJI_NAMES);
+
+/** Replace :shortcode: with its glyph. Unknown codes are left untouched. */
+function applyEmoji(text) {
+  return String(text).replace(/:([a-z0-9_+\-]{2,32}):/gi, (whole, code) => {
+    const key = code.toLowerCase();
+    return EMOJI_CODES.has(key) ? EMOJI[key] : whole;
+  });
+}
+
+/* ══════════════════════════════════════════════════════
    Markdown (escape first, then a small subset)
    ══════════════════════════════════════════════════════ */
 
@@ -63,7 +125,7 @@ export function renderMarkdown(raw) {
     return `\u0000B${blocks.length - 1}\u0000`;
   });
 
-  const inline = (s) => escapeHtml(s)
+  const inline = (s) => escapeHtml(applyEmoji(s))
     .replace(/`([^`\n]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
@@ -146,8 +208,15 @@ function messageEl(m) {
   const who = whoOf(m.from);
   const initial = (who.name || '?').slice(0, 1).toUpperCase();
 
+  // Right-alignment means "a human typed this here". The hub tags every message
+  // with its origin (user vs agent), so switching the speaking identity to an
+  // agent does not silently move agent output to the right.
+  const isSelf = (m.origin || (m.from === 'human' ? 'user' : 'agent')) === 'user'
+    && m.from === state.me;
+
   const article = document.createElement('article');
   article.className = 'msg'
+    + (isSelf ? ' self' : '')
     + (m.from === 'human' ? ' from-human' : '')
     + (m.from === 'system' ? ' from-system' : '');
   article.id = 'm' + m.id;
@@ -338,10 +407,12 @@ function renderMembers() {
 }
 
 /* ══════════════════════════════════════════════════════
-   @ mention autocomplete
+   Composer autocomplete — two modes, one popover
+     @  → mention an agent
+     :  → pick an emoji
    ══════════════════════════════════════════════════════ */
 
-let pop = { open: false, items: [], index: 0 };
+let pop = { open: false, items: [], index: 0, mode: null, trigger: '@' };
 
 function mentionCandidates(query) {
   const all = [{ id: 'all', name: '全体成员', role: '唤醒所有人', color: '#22d3ee', isAll: true }];
@@ -353,8 +424,18 @@ function mentionCandidates(query) {
   return all.filter((c) => !q || c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
 }
 
-function showPop(query) {
-  pop.items = mentionCandidates(query);
+function emojiCandidates(query) {
+  const q = query.toLowerCase();
+  return EMOJI_NAMES
+    .filter((name) => !q || name.includes(q))
+    .slice(0, 60)
+    .map((name) => ({ id: name, name: EMOJI[name], role: `:${name}:`, isEmoji: true }));
+}
+
+function showPop(query, mode) {
+  pop.mode = mode;
+  pop.trigger = mode === 'emoji' ? ':' : '@';
+  pop.items = mode === 'emoji' ? emojiCandidates(query) : mentionCandidates(query);
   if (!pop.items.length) return hidePop();
   pop.open = true;
   pop.index = 0;
@@ -366,27 +447,43 @@ function showPop(query) {
 function hidePop() {
   pop.open = false;
   pop.items = [];
+  pop.mode = null;
   el.pop.classList.remove('show');
   el.input.setAttribute('aria-expanded', 'false');
 }
 
 function renderPop() {
-  el.pop.innerHTML = pop.items.map((c, i) => `
-    <div class="mention-item" role="option" data-i="${i}" aria-selected="${i === pop.index}" style="--c:${c.color}">
-      <span class="av" aria-hidden="true">${escapeHtml(c.isAll ? '全' : c.name.slice(0, 1))}</span>
-      <span class="nm">${escapeHtml(c.name)}</span>
-      <span class="rl">${escapeHtml(c.role)}</span>
-    </div>`).join('');
+  if (pop.mode === 'emoji') {
+    el.pop.classList.add('emoji-grid');
+    el.pop.innerHTML = pop.items.map((c, i) => `
+      <button type="button" class="emoji-cell" role="option" data-i="${i}"
+              aria-selected="${i === pop.index}" title="${escapeHtml(c.role)}">
+        <span class="glyph" aria-hidden="true">${c.name}</span>
+      </button>`).join('');
+  } else {
+    el.pop.classList.remove('emoji-grid');
+    el.pop.innerHTML = pop.items.map((c, i) => `
+      <div class="mention-item" role="option" data-i="${i}" aria-selected="${i === pop.index}" style="--c:${c.color}">
+        <span class="av" aria-hidden="true">${escapeHtml(c.isAll ? '全' : c.name.slice(0, 1))}</span>
+        <span class="nm">${escapeHtml(c.name)}</span>
+        <span class="rl">${escapeHtml(c.role)}</span>
+      </div>`).join('');
+  }
   el.pop.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
 }
 
-function applyMention(candidate) {
+/** Replace the text from the trigger character to the caret with `insert`. */
+function applyPick(candidate) {
   const v = el.input.value;
   const caret = el.input.selectionStart;
   const before = v.slice(0, caret);
-  const at = before.lastIndexOf('@');
+  const at = before.lastIndexOf(pop.trigger);
   if (at < 0) return hidePop();
-  const insert = `@${candidate.name} `;
+
+  const insert = pop.mode === 'emoji'
+    ? `${candidate.name} `
+    : `@${candidate.name} `;
+
   el.input.value = before.slice(0, at) + insert + v.slice(caret);
   const pos = at + insert.length;
   el.input.setSelectionRange(pos, pos);
@@ -394,21 +491,33 @@ function applyMention(candidate) {
   el.input.focus();
 }
 
-function detectMention() {
+/**
+ * Decide which popover (if any) the caret is in.
+ * The trigger must be preceded by start/whitespace so that emails and
+ * "http://" do not open the emoji picker.
+ */
+function detectTrigger() {
   const caret = el.input.selectionStart;
   const before = el.input.value.slice(0, caret);
-  const at = before.lastIndexOf('@');
-  if (at < 0) return hidePop();
-  const seg = before.slice(at + 1);
-  if (/[\s\n]/.test(seg) || seg.length > 12) return hidePop();
-  showPop(seg);
+
+  for (const [ch, mode] of [['@', 'mention'], [':', 'emoji']]) {
+    const at = before.lastIndexOf(ch);
+    if (at < 0) continue;
+    if (at > 0 && !/[\s\n(]/.test(before[at - 1])) continue;
+    const seg = before.slice(at + 1);
+    if (/[\s\n]/.test(seg)) continue;
+    if (seg.length > (mode === 'emoji' ? 20 : 12)) continue;
+    // Bare ":" opens the full picker; a word means filtering.
+    return showPop(seg, mode);
+  }
+  return hidePop();
 }
 
 el.pop.addEventListener('pointerdown', (e) => {
-  const item = e.target.closest('.mention-item');
+  const item = e.target.closest('.mention-item, .emoji-cell');
   if (!item) return;
   e.preventDefault();
-  applyMention(pop.items[Number(item.dataset.i)]);
+  applyPick(pop.items[Number(item.dataset.i)]);
 });
 
 /* ══════════════════════════════════════════════════════
@@ -634,7 +743,7 @@ el.input.addEventListener('keydown', (e) => {
   if (pop.open && pop.items.length) {
     if (e.key === 'ArrowDown') { e.preventDefault(); pop.index = (pop.index + 1) % pop.items.length; renderPop(); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); pop.index = (pop.index - 1 + pop.items.length) % pop.items.length; renderPop(); return; }
-    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyMention(pop.items[pop.index]); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); applyPick(pop.items[pop.index]); return; }
     if (e.key === 'Escape') { e.preventDefault(); hidePop(); return; }
   }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -643,8 +752,8 @@ el.input.addEventListener('keydown', (e) => {
   }
 });
 
-el.input.addEventListener('input', () => { detectMention(); autosize(); });
-el.input.addEventListener('click', detectMention);
+el.input.addEventListener('input', () => { detectTrigger(); autosize(); });
+el.input.addEventListener('click', detectTrigger);
 el.input.addEventListener('blur', () => setTimeout(hidePop, 120));
 
 el.asWho.value = state.me;

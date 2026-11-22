@@ -45,7 +45,7 @@ export class Hub {
    * Append a message, broadcast it, and wake whoever was mentioned.
    * @returns the stored message
    */
-  say({ room, from, text, refs = [], kind = 'chat', dialog = null }) {
+  say({ room, from, text, refs = [], kind = 'chat', dialog = null, origin = 'user' }) {
     const body = String(text || '').trim();
     if (!body && !dialog) throw new Error('empty message');
 
@@ -57,6 +57,7 @@ export class Hub {
       mentions,
       refs,
       kind,
+      origin,
       ...(dialog ? { dialog } : {}),
     });
 
@@ -98,6 +99,7 @@ export class Hub {
       mentions: this.resolveMentions(text),
       replyTo: msgId || null,
       kind: 'chat',
+      origin: 'agent',
     });
     this.sse.broadcast('message', message);
     this.log.line(`reply ${agentId} (${String(text || '').length} chars)`);
@@ -164,6 +166,7 @@ export class Hub {
         mentions: this.resolveMentions(result.text),
         replyTo: message.id,
         kind: 'chat',
+        origin: 'agent',
       });
       this.sse.broadcast('message', reply);
       this.log.line(`reply ${agent.id} (${(result.text || '').length} chars)`);

@@ -21,7 +21,8 @@
   --radius: 14px;
   --target: 24px;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+          "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 }
 
 @media (pointer: coarse) {
@@ -272,6 +273,10 @@ main::-webkit-scrollbar-thumb {
   font-size: 14px;
   line-height: 1.62;
   overflow-wrap: anywhere;
+  /* Shrink to the text, but never past the column: a two-word reply should not
+     paint a full-width bar. */
+  width: fit-content;
+  max-width: 100%;
 }
 
 .msg.from-human .bubble {
@@ -285,6 +290,24 @@ main::-webkit-scrollbar-thumb {
   color: #fecaca;
   font-size: 13px;
 }
+
+/* ── 自己发的消息：右对齐 ───────────────────────────────
+   Only a human typing as themselves gets this. An agent speaking under the
+   operator's identity stays left, so a room full of agents is still readable. */
+.msg.self {
+  grid-template-columns: 1fr 40px;
+}
+.msg.self .av-lg { order: 2; }
+.msg.self .body { justify-self: end; }
+.msg.self .meta { justify-content: flex-end; }
+.msg.self .meta .time { margin-left: 0; order: -1; margin-right: auto; }
+.msg.self .bubble {
+  border-color: rgba(34, 211, 238, .30);
+  background: linear-gradient(180deg, rgba(20, 62, 78, .72), rgba(14, 44, 58, .72));
+  border-radius: 14px 14px 4px 14px;
+}
+.msg.self .refs { justify-content: flex-end; }
+.msg.self .dialog-card { text-align: left; }
 
 /* markdown */
 .bubble > :first-child { margin-top: 0; }
@@ -539,6 +562,34 @@ textarea::placeholder { color: var(--text-faint); }
 .mention-item .rl { font-size: 11px; color: var(--text-faint); margin-left: auto; }
 .mention-item[aria-selected="true"], .mention-item:hover { background: rgba(34, 211, 238, .10); }
 .mention-item[aria-selected="true"] { box-shadow: inset 2px 0 0 var(--cyan); }
+
+/* emoji picker: same popover, grid layout.
+   Scope to .show so it stays hidden until opened. */
+.mention-pop.show.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 2px;
+  max-height: 220px;
+  padding: 8px;
+}
+.emoji-cell {
+  border: 0;
+  background: none;
+  border-radius: 7px;
+  cursor: pointer;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  min-block-size: 38px;
+  transition: background .12s;
+}
+.emoji-cell:hover,
+.emoji-cell[aria-selected="true"] { background: rgba(34, 211, 238, .14); }
+.emoji-cell .glyph {
+  font-size: 21px;
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+}
 
 /* ── workspace panel ───────────────────────────────────── */
 .panel {
