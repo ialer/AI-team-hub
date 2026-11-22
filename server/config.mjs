@@ -58,12 +58,36 @@ function envOverrides() {
 }
 
 /**
+ * Expand `${VAR}` references in config values from the environment.
+ *
+ * Config files are committed; secrets are not. This lets the shipped example
+ * say `"secretAccessKey": "${R2_SECRET_ACCESS_KEY}"` without the literal
+ * placeholder ever reaching a client.
+ *
+ * A missing variable expands to an empty string, so the affected feature
+ * disables itself (R2 falls back to local) instead of starting with a bogus
+ * credential and failing later at request time.
+ */
+export function expandEnv(value, env = process.env) {
+  if (typeof value === 'string') {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => env[name] ?? '');
+  }
+  if (Array.isArray(value)) return value.map((v) => expandEnv(v, env));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = expandEnv(v, env);
+    return out;
+  }
+  return value;
+}
+
+/**
  * Load configuration.
  * @param {string} [file] explicit config path (default: <root>/config.json)
  */
 export function loadConfig(file) {
   const configPath = file || process.env.HUB_CONFIG || path.join(ROOT, 'config.json');
-  const fromFile = readJson(configPath) || {};
+  const fromFile = expandEnv(readJson(configPath) || {});
   const config = { ...DEFAULTS, ...fromFile, ...envOverrides() };
 
   config.root = ROOT;

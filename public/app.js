@@ -48,6 +48,8 @@ const el = {
   pendingImages: $('#pendingImages'),
   attach: $('#attach'),
   filePicker: $('#filePicker'),
+  discussBar: $('#discussBar'),
+  discussBtn: $('#discussBtn'),
 };
 
 /* ══════════════════════════════════════════════════════
@@ -230,6 +232,7 @@ function messageEl(m) {
     + (m.from === 'system' ? ' from-system' : '');
   article.id = 'm' + m.id;
   if (m.truncated) article.dataset.truncated = '1';
+  if (m.kind && m.kind !== 'chat') article.dataset.kind = m.kind;
 
   article.innerHTML = `
     <div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(initial)}</div>
@@ -648,6 +651,11 @@ function connectStream() {
   es.addEventListener('delta', (e) => onDelta(JSON.parse(e.data)));
   es.addEventListener('tool', (e) => onTool(JSON.parse(e.data)));
   es.addEventListener('stream_end', (e) => onStreamEnd(JSON.parse(e.data)));
+  es.addEventListener('discussion', (e) => {
+    const d = JSON.parse(e.data);
+    // Only surface it when the operator is looking at that discussion.
+    if (d && d.room === state.room) renderDiscussionBar(d);
+  });
 
   es.addEventListener('presence', (e) => {
     const { agents } = JSON.parse(e.data);
@@ -846,6 +854,155 @@ function onStreamEnd(data) {
   s.el.remove();
   streams.delete(from);
 }
+
+/* ══════════════════════════════════════════════════════
+   Discussions
+   A discussion is its own room plus a status bar. Speakers answer in turn, so
+   the thread reads top to bottom like a meeting minute rather than a pile of
+   simultaneous replies.
+   ══════════════════════════════════════════════════════ */
+
+const discussion = {
+  active: null,   // the record being watched
+};
+
+function renderDiscussionBar(record) {
+  const bar = el.discussBar;
+  if (!record) {
+    bar.hidden = true;
+    bar.innerHTML = '';
+    return;
+  }
+  discussion.active = record;
+  const running = record.status === 'running';
+  const names = record.participants.map((id) => state.agents[id]?.name || id).join(' · ');
+  const turns = record.turns ? record.turns.length : 0;
+
+  bar.hidden = false;
+  bar.className = 'discuss-bar' + (running ? ' running' : ' done');
+  bar.innerHTML = `
+    <span class="discuss-icon" aria-hidden="true">${running ? '💬' : '📋'}</span>
+    <div class="discuss-main">
+      <div class="discuss-topic">${escapeHtml(record.topic)}</div>
+      <div class="discuss-meta">
+        ${escapeHtml(names)} · 第 ${turns}/${record.policy.maxTurns} 轮 · ${escapeHtml(record.policy.turnTaking)}
+        ${record.stopReason ? ' · ' + escapeHtml(record.stopReason) : ''}
+      </div>
+    </div>
+    ${running
+      ? '<button type="button" class="btn" id="discussStop">结束</button>'
+      : '<button type="button" class="btn" id="discussClose">收起</button>'}
+  `;
+
+  bar.querySelector('#discussStop')?.addEventListener('click', async () => {
+    try {
+      await fetch(`/api/discussions/${encodeURIComponent(record.id)}/stop`, { method: 'POST' });
+    } catch (e) { toast('结束失败：' + e.message); }
+  });
+  bar.querySelector('#discussClose')?.addEventListener('click', () => {
+    discussion.active = null;
+    renderDiscussionBar(null);
+  });
+}
+
+/** Switch the visible room. Discussions live in their own room. */
+async function enterRoom(room) {
+  state.room = room;
+  el.list.innerHTML = '';
+  state.lastId = 0;
+  await loadHistory();
+}
+
+/** Small composer dialog for starting a discussion. */
+function openDiscussForm() {
+  const ids = Object.entries(state.agents).filter(([, a]) => a.enabled !== false).map(([id]) => id);
+  if (ids.length < 2) {
+    toast('至少需要两个 agent 才能发起讨论');
+    return;
+  }
+
+  const dlg = document.createElement('dialog');
+  dlg.className = 'form-dialog';
+  dlg.innerHTML = `
+    <form method="dialog" class="form-body">
+      <h3>发起分组讨论</h3>
+      <div class="field">
+        <label for="dtopic">话题 <span class="req">*</span></label>
+        <input type="text" id="dtopic" placeholder="要讨论什么？" required>
+      </div>
+      <div class="field">
+        <label>参与者</label>
+        <div class="check-list">
+          ${ids.map((id) => `
+            <label class="check">
+              <input type="checkbox" value="${escapeHtml(id)}" ${ids.length <= 3 ? 'checked' : ''}>
+              <span>${escapeHtml(state.agents[id]?.name || id)}</span>
+              <span class="hint">${escapeHtml(state.agents[id]?.role || '')}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="dpolicy">发言策略</label>
+          <select id="dpolicy">
+            <option value="round-robin">轮流（成本可预测）</option>
+            <option value="selector">LLM 选（更贴合内容，多一次调用）</option>
+            <option value="mention">人工点名（我 @ 谁谁说话）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="dturns">最大轮次</label>
+          <input type="number" id="dturns" value="6" min="1" max="50">
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button type="button" class="btn" data-act="cancel">取消</button>
+        <button type="button" class="btn primary" data-act="start">开始</button>
+      </div>
+    </form>`;
+  document.body.appendChild(dlg);
+
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); });
+  dlg.querySelector('[data-act="cancel"]').addEventListener('click', close);
+
+  dlg.querySelector('[data-act="start"]').addEventListener('click', async () => {
+    const topic = dlg.querySelector('#dtopic').value.trim();
+    const participants = [...dlg.querySelectorAll('.check-list input:checked')].map((i) => i.value);
+    if (!topic) { dlg.querySelector('#dtopic').focus(); return; }
+    if (participants.length < 2) { toast('至少选两个参与者'); return; }
+
+    const btn = dlg.querySelector('[data-act="start"]');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/discussions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          participants,
+          policy: {
+            turnTaking: dlg.querySelector('#dpolicy').value,
+            maxTurns: Number(dlg.querySelector('#dturns').value) || 6,
+          },
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      close();
+      await enterRoom(j.discussion.room);
+      renderDiscussionBar(j.discussion);
+    } catch (e) {
+      toast('发起失败：' + e.message);
+      btn.disabled = false;
+    }
+  });
+
+  dlg.showModal();
+  dlg.querySelector('#dtopic').focus();
+}
+
+el.discussBtn?.addEventListener('click', openDiscussForm);
 
 /* ══════════════════════════════════════════════════════
    Send

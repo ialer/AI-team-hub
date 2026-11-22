@@ -10,6 +10,13 @@ services:
       HUB_PORT: "8899"
       HUB_HOST: "0.0.0.0"
       HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in .env}"
+      # Media storage. Leave blank to keep files on the data volume.
+      # config.json refers to these as ${R2_*}; they are expanded at load time.
+      R2_ACCOUNT_ID: "${R2_ACCOUNT_ID:-}"
+      R2_BUCKET: "${R2_BUCKET:-}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"
+      R2_PUBLIC_BASE_URL: "${R2_PUBLIC_BASE_URL:-}"
     volumes:
       # Everything persistent lives in ./data — back this up and you are done.
       - ./data:/app/data

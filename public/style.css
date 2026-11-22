@@ -788,6 +788,60 @@ textarea::placeholder { color: var(--text-faint); }
   font-size: 11px;
 }
 
+/* ── discussion status bar ───────────────────────────── */
+.discuss-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 18px 0;
+  padding: 9px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(90deg, rgba(34, 211, 238, .10), rgba(167, 139, 250, .07));
+  max-width: 940px;
+  margin-inline: auto;
+}
+.discuss-bar[hidden] { display: none; }
+.discuss-bar.done { border-color: var(--line); background: rgba(255, 255, 255, .03); }
+.discuss-icon { font-size: 16px; flex: none; }
+.discuss-main { min-width: 0; flex: 1; }
+.discuss-topic {
+  font-size: 13.5px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.discuss-meta {
+  font-size: 11px; color: var(--text-faint);
+  font-family: var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.discuss-bar .btn { flex: none; padding: 5px 12px; font-size: 12px; }
+
+/* a discussion turn is visually distinct from ordinary chat */
+.msg[data-kind="discussion"] .bubble {
+  border-left: 2px solid rgba(167, 139, 250, .45);
+  border-radius: 4px 12px 12px 4px;
+}
+
+/* ── generic form dialog (start a discussion) ────────── */
+.form-dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--panel-solid);
+  color: var(--text);
+  padding: 0;
+  width: min(460px, 92vw);
+  max-height: 88dvh;
+  overflow: auto;
+}
+.form-dialog::backdrop { background: rgba(2, 5, 10, .82); backdrop-filter: blur(3px); }
+.form-body { padding: 18px; display: grid; gap: 12px; }
+.form-body h3 { margin: 0 0 2px; font-size: 15px; font-weight: 650; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.check-list { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; }
+.check-list .check { justify-content: flex-start; }
+.check-list .hint { color: var(--text-faint); font-size: 11px; margin-left: auto; }
+.form-dialog .dialog-foot { padding: 0; border-top: 0; margin-top: 4px; }
+
 .toast-slot {
   position: fixed; right: 16px; bottom: 16px; z-index: 30;
   display: grid; gap: 8px; justify-items: end;

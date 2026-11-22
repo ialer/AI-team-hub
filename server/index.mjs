@@ -21,6 +21,7 @@ import { Hub } from './hub.mjs';
 import { createSurfaces } from './surfaces.mjs';
 import { createStorage } from './storage.mjs';
 import { attachWebSocket } from './ws.mjs';
+import { DiscussionManager } from './discussions.mjs';
 import { assertImage, imageSize, contentHash, parseMultipart, MAX_UPLOAD_BYTES } from './media.mjs';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
@@ -42,6 +43,12 @@ for (const agent of config.agents) {
 const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
 const surfaces = createSurfaces({ dataDir: config.dataDir, log });
 const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
+
+const discussions = new DiscussionManager({
+  hub, registry, sse, log,
+  store: new JsonStore(config.dataDir, 'discussions.json'),
+  config: { defaultRoom: config.defaultRoom, selector: config.discussion && config.discussion.selector },
+});
 
 /* ── helpers ──────────────────────────────────────────── */
 
@@ -422,6 +429,36 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, message });
       }
       return sendJson(res, 200, { ok: true });
+    }
+
+    /* ── discussions ── */
+    if (p === '/api/discussions' && req.method === 'GET') {
+      return sendJson(res, 200, { discussions: discussions.list() });
+    }
+
+    if (p === '/api/discussions' && req.method === 'POST') {
+      const body = await readBody(req);
+      const record = discussions.create({
+        topic: body.topic,
+        participants: body.participants,
+        policy: body.policy || {},
+        room: body.room,
+      });
+      return sendJson(res, 200, { ok: true, discussion: record });
+    }
+
+    if (p.startsWith('/api/discussions/') && req.method === 'GET') {
+      const id = p.split('/')[3];
+      const record = discussions.get(id);
+      if (!record) return sendJson(res, 404, { error: 'not found' });
+      return sendJson(res, 200, { discussion: record });
+    }
+
+    if (p.startsWith('/api/discussions/') && p.endsWith('/stop') && req.method === 'POST') {
+      const id = p.split('/')[3];
+      const record = discussions.stop(id, 'stopped by operator');
+      if (!record) return sendJson(res, 404, { error: 'not found' });
+      return sendJson(res, 200, { ok: true, discussion: record });
     }
 
     /* ── workspace surfaces ── */

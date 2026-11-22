@@ -10,6 +10,7 @@
  */
 import { createMentionResolver, stripMentions } from './mentions.mjs';
 import { getAdapter } from './adapters/index.mjs';
+import { EventEmitter } from 'node:events';
 
 export class Hub {
   constructor({ config, log, messages, registry, sse, wakeQueue, dialogs }) {
@@ -24,6 +25,11 @@ export class Hub {
     this.resolveMentions = createMentionResolver(config.agents);
     this.inFlight = new Map(); // agentId -> { msgId, startedAt, timer }
     this.streams = new Map();  // agentId -> live stream buffer
+
+    // Anything that needs to react to a finished turn (e.g. a running
+    // discussion) subscribes here instead of polling the message log.
+    this.events = new EventEmitter();
+    this.events.setMaxListeners(50);
   }
 
   /* ── reads ────────────────────────────────────────────── */
@@ -50,7 +56,9 @@ export class Hub {
     const body = String(text || '').trim();
     if (!body && !dialog) throw new Error('empty message');
 
-    const mentions = kind === 'chat' ? this.resolveMentions(body) : [];
+    // Mentions are resolved for every kind, not just plain chat: a discussion
+    // turn wakes its speaker by mentioning them, and it is not a 'chat' message.
+    const mentions = this.resolveMentions(body);
     const message = this.messages.append({
       room: room || this.config.defaultRoom,
       from,
@@ -78,6 +86,9 @@ export class Hub {
     }
 
     this.log.line(`say ${from} → [${mentions.join(',') || '—'}] ${stripMentions(body).slice(0, 60)}`);
+    // Manual discussions wait for an operator mention; emit before waking so a
+    // waiter can claim the turn.
+    this.events.emit('said', message);
     this.wake(message);
     return message;
   }
@@ -105,6 +116,8 @@ export class Hub {
     });
     this.sse.broadcast('message', message);
     this.log.line(`reply ${agentId} (${String(text || '').length} chars)`);
+    // Let whoever is waiting (a discussion turn) know this agent has spoken.
+    this.events.emit('turn', { agentId, message, room });
 
     // A reply can itself mention someone — let it start the next turn.
     this.wake(message);
@@ -180,6 +193,9 @@ export class Hub {
       });
       this.sse.broadcast('message', reply);
       this.log.line(`reply ${agent.id} (${(result.text || '').length} chars)`);
+      // Same signal the connector path emits, so a discussion waiting on this
+      // agent is released regardless of how the agent was woken.
+      this.events.emit('turn', { agentId: agent.id, message: reply, room: message.room });
       this.wake(reply);
     } catch (e) {
       this.systemNotice(message.room, `${this.displayName(agent.id)} 唤醒失败：${String(e.message).slice(0, 300)}`);
@@ -329,6 +345,7 @@ export class Hub {
     this.sse.broadcast('message', message);
     this.sse.broadcast('stream_end', { from: agentId, msgId: message.id });
     this.log.line(`stream ${agentId} → ${body.length} chars${truncated ? ' (truncated)' : ''}`);
+    this.events.emit('turn', { agentId, message, room: stream.room });
 
     this.wake(message);
     return message;

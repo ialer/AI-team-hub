@@ -25,7 +25,7 @@
         "bucket": "${R2_BUCKET}",
         "accessKeyId": "${R2_ACCESS_KEY_ID}",
         "secretAccessKey": "${R2_SECRET_ACCESS_KEY}",
-        "publicBaseUrl": "https://media.example.com"
+        "publicBaseUrl": "${R2_PUBLIC_BASE_URL}"
       }
     }
   },

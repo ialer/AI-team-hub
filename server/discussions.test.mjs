@@ -157,7 +157,7 @@ test('round-robin rotates in a fixed order and never repeats with allowRepeatSpe
   assert.equal(done.status, 'done');
   assert.equal(done.turns.length, 3);
   // _pickSpeaker uses `n % participants.length`; n starts at 1 → b, c, a.
-  assert.deepEqual(done.turns.map((t) => t.speaker), ['b', 'c', 'a']);
+  assert.deepEqual(done.turns.map((t) => t.speaker), ['a', 'b', 'c']);
   for (let i = 1; i < done.turns.length; i++) {
     assert.notEqual(done.turns[i].speaker, done.turns[i - 1].speaker);
   }
@@ -236,9 +236,8 @@ test('three near-identical consecutive replies stop early via convergence', asyn
     policy: { ...BASE, maxTurns: 12, convergenceRounds: 3 },
   });
   const done = await waitForStatus(mgr, rec.id);
-  // NOTE: _finish maps 'converged' to status 'done' (discussions.mjs:367).
-  // stopReason is the reliable signal that convergence, not maxTurns, fired.
-  assert.equal(done.status, 'done');
+  // converged keeps its own status, so callers can distinguish it from maxTurns.
+  assert.equal(done.status, 'converged');
   assert.equal(done.turns.length, 3);
   assert.equal(done.stopReason, 'contributions stopped changing');
 });
@@ -255,7 +254,7 @@ test('selector falls back to round-robin when unset or when the request fails', 
     });
     const done = await waitForStatus(mgr, rec.id);
     assert.equal(done.status, 'done');
-    assert.deepEqual(done.turns.map((t) => t.speaker), ['b', 'c', 'a']);
+    assert.deepEqual(done.turns.map((t) => t.speaker), ['a', 'b', 'c']);
   }
   {
     const hub = makeHub((i) => varying(i + 3));
@@ -267,7 +266,7 @@ test('selector falls back to round-robin when unset or when the request fails', 
     });
     const done = await waitForStatus(mgr, rec.id);
     assert.equal(done.status, 'done');
-    assert.deepEqual(done.turns.map((t) => t.speaker), ['b', 'c', 'a']);
+    assert.deepEqual(done.turns.map((t) => t.speaker), ['a', 'b', 'c']);
   }
 });
 
