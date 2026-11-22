@@ -419,7 +419,12 @@ async function main() {
   }
 }
 
-main().then((code) => process.exit(code || 0)).catch((e) => {
+// Set the exit code and let Node drain on its own. Calling process.exit() here
+// races with handles that fetch/child_process are still closing and trips a
+// libuv assertion on Windows ("UV_HANDLE_CLOSING").
+main().then((code) => {
+  process.exitCode = code || 0;
+}).catch((e) => {
   console.error(c.red(`fatal: ${e.stack || e.message}`));
-  process.exit(1);
+  process.exitCode = 1;
 });

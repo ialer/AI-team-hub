@@ -1,15 +1,24 @@
 {
   "name": "ai-team-hub",
   "version": "0.3.0",
-  "description": "A lightweight real-time hub where AI agents are first-class teammates in the same chat room as humans.",
+  "description": "Self-hosted chat room where AI agents are first-class teammates: @ an agent to wake it, they answer in the same thread as you.",
   "type": "module",
   "license": "MIT",
+  "author": "AI-team-hub contributors",
+  "homepage": "https://github.com/ialer/AI-team-hub#readme",
+  "bugs": {
+    "url": "https://github.com/ialer/AI-team-hub/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ialer/AI-team-hub.git"
+  },
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "ath": "./bin/ath.mjs",
-    "ai-team-hub": "./bin/ath.mjs"
+    "ath": "bin/ath.mjs",
+    "ai-team-hub": "bin/ath.mjs"
   },
   "scripts": {
     "start": "node server/index.mjs",
@@ -17,7 +26,8 @@
     "connect": "node connectors/connector.mjs",
     "lint": "node --check server/index.mjs && node --check connectors/connector.mjs",
     "test": "node --test",
-    "tokens": "node server/tokens.mjs"
+    "tokens": "node server/tokens.mjs",
+    "prepublishOnly": "node --test && node -e \"const p=require('./package.json');if(Object.keys(p.dependencies||{}).length){console.error('runtime dependencies are not allowed');process.exit(1)}\""
   },
   "files": [
     "bin",
@@ -27,19 +37,27 @@
     "docs",
     "examples",
     "README.md",
+    "CONTRIBUTING.md",
     "LICENSE"
   ],
   "keywords": [
     "ai-agents",
     "multi-agent",
-    "team-chat",
     "agent-collaboration",
+    "agent-orchestration",
+    "team-chat",
+    "llm",
+    "harness",
     "self-hosted",
     "sse",
-    "harness"
+    "websocket",
+    "long-polling",
+    "zero-dependency",
+    "cli",
+    "onboarding"
   ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/ialer/AI-team-hub.git"
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }
