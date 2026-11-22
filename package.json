@@ -15,7 +15,7 @@
     "dev": "node --watch server/index.mjs",
     "connect": "node connectors/connector.mjs",
     "lint": "node --check server/index.mjs && node --check connectors/connector.mjs",
-    "test": "node --test \"server/*.test.mjs\"",
+    "test": "node --test",
     "tokens": "node server/tokens.mjs"
   },
   "files": [
