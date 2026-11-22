@@ -240,6 +240,7 @@ function messageEl(m) {
       <div class="meta">
         <span class="who" style="--c:${who.color}">${escapeHtml(who.name)}</span>
         <span class="role">${escapeHtml(who.role || '')}</span>
+        ${m.question == null ? '' : `<span class="role q-tag">Q${Number(m.question) + 1}</span>`}
         <time class="time" datetime="${new Date(m.ts).toISOString()}">${timeOf(m.ts)}</time>
       </div>
       <div class="bubble">${renderMarkdown(m.text)}</div>
@@ -877,6 +878,18 @@ function renderDiscussionBar(record) {
   const running = record.status === 'running';
   const names = record.participants.map((id) => state.agents[id]?.name || id).join(' · ');
   const turns = record.turns ? record.turns.length : 0;
+  const skips = record.skips ? record.skips.length : 0;
+
+  // Which planned question are we on, and what is it? This is the single most
+  // useful piece of context while a discussion runs — without it the bar says
+  // "turn 3/12" and nothing about what is being decided.
+  const qs = record.questions || [];
+  const answered = qs.length
+    ? Math.min(qs.reduce((max, _, i) => (
+      (record.turns || []).some((t) => t.question === i) ? i + 1 : max
+    ), 0), qs.length)
+    : 0;
+  const currentQ = qs.length ? qs[Math.min(answered, qs.length - 1)] : null;
 
   bar.hidden = false;
   bar.className = 'discuss-bar' + (running ? ' running' : ' done');
@@ -884,8 +897,17 @@ function renderDiscussionBar(record) {
     <span class="discuss-icon" aria-hidden="true">${running ? '💬' : '📋'}</span>
     <div class="discuss-main">
       <div class="discuss-topic">${escapeHtml(record.topic)}</div>
+      ${qs.length && running
+        ? `<div class="discuss-question">
+             <span class="q-badge">第 ${Math.min(answered + 1, qs.length)}/${qs.length} 题</span>
+             ${escapeHtml(currentQ || '')}
+           </div>`
+        : qs.length
+          ? `<div class="discuss-meta">已答 ${answered}/${qs.length} 题</div>`
+          : ''}
       <div class="discuss-meta">
-        ${escapeHtml(names)} · 第 ${turns}/${record.policy.maxTurns} 轮 · ${escapeHtml(record.policy.turnTaking)}
+        ${escapeHtml(names)} · ${turns}/${record.policy.maxTurns} 轮 · ${escapeHtml(record.policy.turnTaking)}
+        ${skips ? ` · ${skips} 次弃权` : ''}
         ${record.stopReason ? ' · ' + escapeHtml(record.stopReason) : ''}
       </div>
     </div>
@@ -949,10 +971,24 @@ function openDiscussForm() {
             <option value="selector">LLM 选（更贴合内容，多一次调用）</option>
             <option value="mention">人工点名（我 @ 谁谁说话）</option>
           </select>
+          <div class="hint">谁都可以回 LISTEN 弃权，弃权不消耗轮次</div>
         </div>
         <div class="field">
           <label for="dturns">最大轮次</label>
           <input type="number" id="dturns" value="6" min="1" max="50">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="check" style="margin-top:4px">
+            <input type="checkbox" id="dplan" checked>
+            <span>先拆成具体问题再讨论</span>
+          </label>
+          <div class="hint">避免话题漂移，纪要也按问题分组</div>
+        </div>
+        <div class="field">
+          <label for="dperq">每题轮次</label>
+          <input type="number" id="dperq" value="2" min="1" max="6">
         </div>
       </div>
       <div class="dialog-foot">
@@ -984,6 +1020,8 @@ function openDiscussForm() {
           policy: {
             turnTaking: dlg.querySelector('#dpolicy').value,
             maxTurns: Number(dlg.querySelector('#dturns').value) || 6,
+            planFirst: dlg.querySelector('#dplan').checked,
+            turnsPerQuestion: Number(dlg.querySelector('#dperq').value) || 2,
           },
         }),
       });

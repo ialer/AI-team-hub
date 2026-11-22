@@ -289,3 +289,92 @@ test('finishing posts one recap into the default room with topic and names', asy
   assert.match(recaps[0].text, /伯言/);
   assert.match(recaps[0].text, /讨论结束/);
 });
+
+/* ── 10. Listen (declining a turn) ─────────────────────── */
+
+test('LISTEN does not consume a turn and that speaker is skipped', async () => {
+  // 'b' declines; the room should still get three real contributions, and b
+  // should only be called on once.
+  const calls = { a: 0, b: 0, c: 0 };
+  const hub = makeHub((i, speaker) => {
+    calls[speaker] = (calls[speaker] || 0) + 1;
+    if (speaker === 'b' && calls.b === 1) return 'LISTEN';
+    return varying(i);
+  });
+  const mgr = makeManager({ hub });
+  const rec = mgr.create({
+    topic: 'Listen 测试', participants: ['a', 'b', 'c'],
+    policy: { ...BASE, maxTurns: 3, planFirst: false },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+
+  assert.equal(done.status, 'done');
+  assert.equal(done.turns.length, 3, 'a pass must not consume a turn');
+  assert.ok(!done.turns.some((t) => t.speaker === 'b' && /listen/i.test(t.text)));
+  assert.equal(done.skips.length, 1, 'one pass recorded');
+  assert.equal(done.skips[0].speaker, 'b');
+});
+
+test('all participants passing ends the discussion as all-passed', async () => {
+  const hub = makeHub(() => 'LISTEN');
+  const mgr = makeManager({ hub });
+  const rec = mgr.create({
+    topic: '全都弃权', participants: ['a', 'b', 'c'],
+    policy: { ...BASE, maxTurns: 5, planFirst: false },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+
+  assert.equal(done.status, 'all-passed');
+  assert.equal(done.turns.length, 0);
+  assert.ok(done.skips.length >= 3, 'everyone should have been asked once');
+});
+
+test('the Chinese pass marker is recognised too', async () => {
+  const hub = makeHub((i, speaker) => (speaker === 'a' ? '【弃权】' : varying(i)));
+  const mgr = makeManager({ hub });
+  const rec = mgr.create({
+    topic: '中文弃权', participants: ['a', 'b'],
+    policy: { ...BASE, maxTurns: 2, planFirst: false },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+  assert.equal(done.status, 'done');
+  assert.equal(done.skips.length, 1);
+  assert.equal(done.skips[0].speaker, 'a');
+});
+
+/* ── 11. planned questions ─────────────────────────────── */
+
+test('without a selector the discussion still runs on the raw topic', async () => {
+  // planFirst is on by default; a missing selector must not break anything.
+  const hub = makeHub((i) => varying(i));
+  const mgr = makeManager({ hub, config: {} });
+  const rec = mgr.create({
+    topic: '没有拆题器', participants: ['a', 'b'],
+    policy: { ...BASE, maxTurns: 2 },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+  assert.equal(done.status, 'done');
+  assert.deepEqual(done.questions, []);
+  assert.equal(done.turns.length, 2);
+});
+
+test('recap groups contributions under their question', async () => {
+  const hub = makeHub((i) => varying(i));
+  const store = makeStore();
+  const mgr = makeManager({ hub, store });
+  const rec = mgr.create({
+    topic: '分组纪要', participants: ['a', 'b'],
+    policy: { ...BASE, maxTurns: 2, planFirst: false },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+
+  // Inject questions and tag the existing turns, then re-render the recap.
+  done.questions = ['先迁哪一台？', '回滚路径怎么写？'];
+  done.turns[0].question = 0;
+  done.turns[1].question = 1;
+  const text = mgr._recap(done);
+
+  assert.match(text, /1\. 先迁哪一台？/);
+  assert.match(text, /2\. 回滚路径怎么写？/);
+  assert.match(text, /安琪|伯言/);
+});

@@ -70,7 +70,9 @@ body::before {
   height: 100dvh;
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto 1fr auto;
+  /* header · discussion bar · messages · composer. The bar is [hidden] when no
+     discussion is open, so it contributes nothing in the common case. */
+  grid-template-rows: auto auto 1fr auto;
   overflow: hidden;
   border-left: 1px solid var(--line);
   border-right: 1px solid var(--line);
@@ -680,7 +682,7 @@ textarea::placeholder { color: var(--text-faint); }
 /* ── workspace panel ───────────────────────────────────── */
 .panel {
   display: none;
-  grid-row: 2 / 4;
+  grid-row: 3 / 5;
   border-left: 1px solid var(--line);
   background: rgba(9, 14, 22, .72);
   backdrop-filter: blur(12px);
@@ -816,6 +818,36 @@ textarea::placeholder { color: var(--text-faint); }
 }
 .discuss-bar .btn { flex: none; padding: 5px 12px; font-size: 12px; }
 
+/* current planned question — the one line that keeps a discussion on topic */
+.discuss-question {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: #cfe9f5;
+  line-height: 1.45;
+}
+.discuss-question .q-badge {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(34, 211, 238, .35);
+  background: rgba(34, 211, 238, .10);
+  color: var(--cyan);
+}
+/* which question a turn answered */
+.q-tag {
+  font-family: var(--mono);
+  font-size: 10.5px !important;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(167, 139, 250, .35);
+  color: #c9baf8 !important;
+}
+
 /* a discussion turn is visually distinct from ordinary chat */
 .msg[data-kind="discussion"] .bubble {
   border-left: 2px solid rgba(167, 139, 250, .45);
@@ -894,6 +926,30 @@ textarea::placeholder { color: var(--text-faint); }
   .discuss-bar { margin: 8px 12px 0; padding: 8px 12px; flex-wrap: wrap; }
   .discuss-bar .btn { margin-left: auto; }
   .form-dialog .field-row { grid-template-columns: 1fr; }
+
+  /* Discussion status on a phone: the question becomes its own line so it is
+     not truncated to "第 2/4 题 先迁哪…" */
+  .discuss-question {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+  .discuss-topic { white-space: normal; }
+  .discuss-meta { white-space: normal; }
+
+  /* The start form is a tall sheet on a phone; keep it inside the viewport and
+     clear of the home indicator. */
+  .form-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    position: fixed;
+    inset: auto 0 0 0;
+    max-height: 88dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .form-body { padding: 16px 16px 20px; }
 }
 
 @media (max-width: 860px) {
