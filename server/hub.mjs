@@ -181,6 +181,7 @@ export class Hub {
         config: agent.adapterConfig || {},
       });
       if (result.sessionId) this.registry.markSeen(agent.id, { online: true, sessionId: result.sessionId });
+      this.registry.markReachable(agent.id, true);
 
       const reply = this.messages.append({
         room: message.room,
@@ -198,6 +199,10 @@ export class Hub {
       this.events.emit('turn', { agentId: agent.id, message: reply, room: message.room });
       this.wake(reply);
     } catch (e) {
+      // Remember the failure so the UI can show this push agent as unreachable
+      // instead of pretending nothing happened.
+      this.registry.markReachable(agent.id, false);
+      this.sse.broadcast('presence', { agents: this.registry.publicView() });
       this.systemNotice(message.room, `${this.displayName(agent.id)} 唤醒失败：${String(e.message).slice(0, 300)}`);
     } finally {
       this.clearInFlight(agent.id, 'done');

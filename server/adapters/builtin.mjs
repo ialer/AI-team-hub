@@ -17,8 +17,20 @@ function fill(value, vars) {
   return String(value).replace(/\{(text|sessionId)\}/g, (_, k) => vars[k] ?? '');
 }
 
-function runProcess(command, args, { timeoutMs = 180000, cwd, env } = {}) {
-  return new Promise((resolve) => {
+/**
+ * Turn a session flag into argv tokens.
+ *
+ * `"--resume {sessionId}"` must become two arguments. Pushing it as one string
+ * hands the CLI the literal `"--resume local-abc"`, which argparse rejects with
+ * a usage error — the failure looks like a bad flag, not a quoting bug.
+ */
+export function sessionArgs(flagTemplate, sessionId) {
+  if (!sessionId || !flagTemplate) return [];
+  const fill1 = (s) => String(s).replace(/\{sessionId\}/g, sessionId);
+  if (Array.isArray(flagTemplate)) return flagTemplate.map(fill1);
+  return fill1(flagTemplate).split(/\s+/).filter(Boolean);
+}
+function runProcess(command, args, { timeoutMs = 180000, cwd, env } = {}) {  return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
@@ -88,7 +100,7 @@ export const cliOnce = {
   async wake({ text, sessionId, config }) {
     const vars = { text, sessionId: sessionId || '' };
     const args = (config.args || []).map((a) => fill(a, vars));
-    if (sessionId && config.sessionFlag) args.push(fill(config.sessionFlag, vars));
+    args.push(...sessionArgs(config.sessionFlag, sessionId));
     const r = await runProcess(fill(config.command, vars), args, {
       timeoutMs: config.timeoutMs,
       env: config.env,
@@ -121,7 +133,7 @@ export const cliJson = {
   async wake({ text, sessionId, config }) {
     const vars = { text, sessionId: sessionId || '' };
     const args = (config.args || []).map((a) => fill(a, vars));
-    if (sessionId && config.sessionFlag) args.push(fill(config.sessionFlag, vars));
+    args.push(...sessionArgs(config.sessionFlag, sessionId));
     const r = await runProcess(fill(config.command, vars), args, {
       timeoutMs: config.timeoutMs,
       env: config.env,

@@ -32,6 +32,12 @@ export class AgentRegistry {
     const view = {};
     for (const a of this.agents.values()) {
       const p = this.presence.get(a.id) || {};
+      // A push agent holds no connection, so it has no presence of its own. It
+      // is reachable until a call proves otherwise — that is what the operator
+      // needs to know, and it beats showing a working agent as offline forever.
+      const online = a.mode === 'push'
+        ? (a.enabled !== false && p.reachable !== false)
+        : p.online === true;
       view[a.id] = {
         id: a.id,
         name: a.name,
@@ -39,11 +45,17 @@ export class AgentRegistry {
         color: a.color,
         mode: a.mode,
         enabled: a.enabled,
-        online: p.online === true,
+        online,
         lastSeen: p.lastSeen || null,
       };
     }
     return view;
+  }
+
+  /** Record whether a push agent answered the last time the hub called it. */
+  markReachable(agentId, ok) {
+    const prev = this.presence.get(agentId) || {};
+    this.presence.set(agentId, { ...prev, reachable: ok, lastSeen: Date.now() });
   }
 
   /* ── tokens ───────────────────────────────────────────── */
