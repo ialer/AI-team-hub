@@ -336,8 +336,11 @@ const server = http.createServer(async (req, res) => {
       };
       if (obj.size) headers['Content-Length'] = obj.size;
       res.writeHead(200, headers);
+      // Attach the error handler before piping: a read failure after the
+      // headers are out cannot be turned into a JSON error any more, so the
+      // only honest response is to drop the connection.
+      obj.stream.on('error', () => { try { res.destroy(); } catch { /* gone */ } });
       obj.stream.pipe(res);
-      obj.stream.on('error', () => res.destroy());
       return;
     }
 

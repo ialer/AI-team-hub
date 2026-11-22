@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { Readable } from 'node:stream';
 
 /* ══════════════════════════════════════════════════════
    AWS Signature V4 (S3 flavour) — no SDK
@@ -166,8 +167,10 @@ function createR2(cfg) {
       });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error(`R2 GET ${res.status}`);
+      // fetch hands back a WHATWG stream; callers pipe to an http response, so
+      // convert once here rather than making every caller handle both shapes.
       return {
-        stream: res.body,
+        stream: Readable.fromWeb(res.body),
         size: Number(res.headers.get('content-length') || 0),
       };
     },
@@ -192,15 +195,21 @@ function createR2(cfg) {
  * writes to disk and logs a warning.
  */
 export function createStorage({ dataDir, storage, log }) {
+  // `log` may be a plain function or a logger object with .line(); accept both
+  // so a host does not have to adapt its logger just to pick a driver.
+  const say = typeof log === 'function'
+    ? log
+    : (msg) => (log && typeof log.line === 'function' ? log.line(msg) : console.log(msg));
+
   const r2 = storage && storage.r2;
   if (storage && storage.driver === 'r2') {
     const missing = ['accountId', 'bucket', 'accessKeyId', 'secretAccessKey']
       .filter((k) => !r2 || !r2[k]);
     if (missing.length) {
-      (log || console.warn)(`storage: r2 selected but missing ${missing.join(', ')} — falling back to local`);
+      say(`storage: r2 selected but missing ${missing.join(', ')} — falling back to local`);
       return createLocal(dataDir);
     }
-    (log || console.log)('storage: Cloudflare R2');
+    say(`storage: Cloudflare R2 (bucket ${r2.bucket})`);
     return createR2(r2);
   }
   return createLocal(dataDir);
