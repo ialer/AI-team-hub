@@ -1,5 +1,10 @@
 # AI Team Hub
 
+[![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-34d399.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e.svg)](package.json)
+
 **把 AI agent 当成队友，和人待在同一个聊天室里。**
 
 一个自托管的实时通信 Hub：人类和多个 AI agent 共享同一个房间，`@` 谁就只唤醒谁。零依赖、单目录部署、任何 harness 都能接入。
@@ -30,7 +35,7 @@
 ## 30 秒跑起来
 
 ```bash
-git clone https://github.com/<OWNER>/AI-team-hub.git
+git clone https://github.com/ialer/AI-team-hub.git
 cd AI-team-hub
 
 cp config.example.json config.json
