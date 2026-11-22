@@ -90,6 +90,51 @@ HUB_ADMIN_TOKEN=dev-token-please-change node server/index.mjs
 
 ---
 
+## 媒体存储（R2）
+
+图片上传默认写本地 `data/files/`。要改用 Cloudflare R2，先在 **Hub 进程的环境**里给出凭据：
+
+```bash
+export R2_ACCOUNT_ID=...
+export R2_BUCKET=...
+export R2_ACCESS_KEY_ID=...
+export R2_SECRET_ACCESS_KEY=...
+```
+
+systemd 在 service 里加 `Environment=R2_ACCOUNT_ID=...` 等四行；Docker Compose 需在 `environment:` 中显式列出这四个变量（当前 `docker-compose.yml` 只传 `HUB_*`，`R2_*` 不会自动进容器）。
+
+`config.json` 的 `storage` 段：
+
+```jsonc
+{
+  "storage": {
+    "driver": "r2",
+    "r2": {
+      "accountId": "${R2_ACCOUNT_ID}",
+      "bucket": "${R2_BUCKET}",
+      "accessKeyId": "${R2_ACCESS_KEY_ID}",
+      "secretAccessKey": "${R2_SECRET_ACCESS_KEY}",
+      "publicBaseUrl": "https://media.example.com"   // 可选
+    }
+  }
+}
+```
+
+**密钥不写进 `config.json`。** 示例配置用 `${VAR}` 占位符引用环境变量，避免明文凭据进仓库。R2 端点由 `accountId` 拼出（`<accountId>.r2.cloudflarestorage.com`），区域固定 `auto`，签名用零依赖的 SigV4（`server/storage.mjs`）。
+
+| 配置项 | 作用 |
+|---|---|
+| `driver` | `local`（默认）或 `r2` |
+| `r2.accountId` / `r2.bucket` | 端点与桶名 |
+| `r2.accessKeyId` / `r2.secretAccessKey` | S3 API 凭据，走 SigV4 签名 |
+| `r2.publicBaseUrl` | 可选。配了以后上传返回的 `url` 指向这个公共域名，图片直连 R2，**不经过 Hub**；没配则返回 `/api/file/<key>`，由 Hub 代理读取 |
+
+**回退**：`driver: "r2"` 但四个必填项（accountId / bucket / accessKeyId / secretAccessKey）缺任意一个，Hub 不退出，而是写一行 warning 后回退到本地磁盘。上传接口继续可用，只是文件落在 `data/files/`。排障先看 `data/hub.log` 的 `storage:` 行：`storage: Cloudflare R2` 表示 R2 生效，`... falling back to local` 表示回退。
+
+上传接口与驱动无关：`POST /api/upload` 接受 multipart 文件 part 或 JSON `{ "dataUrl": "..." }`，按字节识别 png / jpeg / gif / webp / avif（不信任 `Content-Type`），上限 10 MB。key 是内容哈希（sha256 前两位 / 哈希.扩展名），相同图片重复上传只存一份。读取走 `GET /api/file/<key>`，带 immutable 长缓存头。
+
+---
+
 ## 反向代理
 
 Hub 有两个长连接（SSE + agent 长轮询），代理必须**关掉缓冲**。

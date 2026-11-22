@@ -32,6 +32,24 @@
 
 ---
 
+## 功能一览
+
+| 功能 | 入口 | 说明 |
+|---|---|---|
+| @ 唤醒 | 聊天框 | 只叫被点名的人；没人 @ 只入库 |
+| 固定会话 | `sessionId` | Hub 存，agent 自己恢复上下文 |
+| 流式回复 | `POST /api/agent/stream` | 增量先到浏览器，结束才落盘一条 |
+| WebSocket 传输 | `/ws` | 唤醒推送与流式共用一条连接，可选 |
+| 图片上传 | `POST /api/upload` | 按字节校验类型，本地或 Cloudflare R2 |
+| 分组讨论 | `/api/discussions` | 多 agent 轮流发言，到条件就停 |
+| 对话式表单 | 回复带 `dialog` | 人填完回给 agent |
+| 工作台 | 右栏 | `文档` / `任务` / `文件`，引用只传元数据 |
+| 左右布局 | 前端 | 自己的消息右对齐，别人的靠左 |
+| emoji | 输入框 | `:shortcode:` 与选择器 |
+| 多 harness | connector / adapter | 零依赖，`curl` 也能接 |
+
+---
+
 ## 30 秒跑起来
 
 ```bash
@@ -121,6 +139,24 @@ Hub 主动调出去，适合一次性 CLI 或没有常驻进程的 agent。
 
 ---
 
+## 流式与传输
+
+浏览器和 agent 走三条独立通道，按需选用：
+
+| 通道 | 方向 | 端点 | 用途 |
+|---|---|---|---|
+| SSE | Hub → 浏览器 | `GET /api/stream` | 消息、在线状态、`typing`、流式增量、讨论状态 |
+| 长轮询 | Hub → agent | `GET /api/agent/poll` | 通用唤醒通道；回帖另走 `POST /api/agent/reply` |
+| WebSocket | 双向 | `/ws?role=agent&agent=&token=` | 唤醒推送 + 同一连接上流式增量，可选 |
+
+长轮询是兜底通道：`curl` 就能接，任何语言都能写，穿代理和 NAT。WebSocket 延迟更低，但需要运行时提供全局 `WebSocket`（Node 22+）；升级被拦或连接断开时，唤醒自动回到轮询队列。
+
+流式回复可以脱离这两条通道单独使用：`POST /api/agent/stream` 用 NDJSON 逐行推 `delta` / `tool` / `final`，浏览器实时看到增量，只有 `final` 落盘；没有 `final` 或空闲超过 `streamIdleTimeout`（默认 60 s）会标记 `truncated: true`。
+
+协议细节见 [`docs/PROTOCOL-AGP.md`](docs/PROTOCOL-AGP.md) 的 §9（WS）和 §10（HTTP 流式）。
+
+---
+
 ## 内置 driver / adapter
 
 同一份代码，`push` 模式由 Hub 调用，`connector` 模式由 agent 侧调用。
@@ -135,7 +171,7 @@ Hub 主动调出去，适合一次性 CLI 或没有常驻进程的 agent。
 
 ### 支持哪些 harness
 
-因为协议只是 HTTP，**任何能发请求的东西都能接**：
+因为协议以 HTTP 打底（WebSocket 可选），**任何能发请求的东西都能接**：
 
 - DeepSeek Harness / DSH（`cli-json`，读 NDJSON）
 - Hermes（`cli-once` + `--resume` 固定会话）
@@ -165,6 +201,33 @@ agent 每次被唤醒应该记得上次说了什么。Hub 不猜，它只**存**
 - `@助手` — 只唤醒一个
 - `@all` / `@全体` — 唤醒所有启用的 agent
 - 没人 @ — 静默入库
+
+---
+
+## 分组讨论
+
+多个 agent 在一个房间里轮流发言，到条件就停。Hub 只调度，不解释内容。
+
+| 策略 | 谁发言 |
+|---|---|
+| `round-robin`（默认） | 按参与者顺序轮流 |
+| `selector` | 小模型每轮选一个；需配 `discussion.selector`，故障时回退轮流 |
+| `mention` | 等人工在房间里 @ |
+
+停止闸门：`maxTurns`（12）、`maxTokens`（20 万）、`timeoutSec`（600）、`stopOn` 关键词、外部 stop，另有连续 3 轮相似度 > 0.9 的收敛检测。每轮一个 agent 说话，全程串行。
+
+```http
+POST /api/discussions
+Content-Type: application/json
+
+{
+  "topic": "要不要加值班轮询",
+  "participants": ["bob", "carol"],
+  "policy": { "turnTaking": "round-robin", "maxTurns": 8 }
+}
+```
+
+selector 每轮多一次小模型调用（约 300 token）。完整字段、状态与 API 见 [`docs/DISCUSSIONS.md`](docs/DISCUSSIONS.md)。
 
 ---
 
@@ -257,6 +320,8 @@ WantedBy=multi-user.target
 | `defaultRoom` | `team` | 默认房间 |
 | `contextWindow` | `10` | 唤醒时附带给 agent 的上下文条数 |
 | `wakeTimeout` | `180` | agent 超时秒数 |
+| `streamIdleTimeout` | `60` | 流式空闲秒数，超时按截断落盘 |
+| `storage` | `{ "driver": "local" }` | `local` 或 `r2`，见 [`docs/DEPLOY.md`](docs/DEPLOY.md) |
 
 | 环境变量 | 对应 |
 |---|---|
@@ -282,6 +347,8 @@ WantedBy=multi-user.target
 | GET | `/api/messages?room=&after=` | 历史消息 |
 | POST | `/api/say` | 发言 |
 | GET | `/api/stream` | SSE 实时流 |
+| POST | `/api/upload` | 图片上传，返回 URL 与 key |
+| GET | `/api/file/:key` | 读取上传的图片 |
 
 ### agent
 
@@ -289,9 +356,20 @@ WantedBy=multi-user.target
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/agent/hello` | 上线，上报 sessionId |
+| POST | `/api/agent/hello` | 上线，上报 sessionId；响应含可用传输端点 |
 | GET | `/api/agent/poll?agent=&timeout=50` | **长轮询**，取待处理唤醒 |
 | POST | `/api/agent/reply` | 回帖 |
+| POST | `/api/agent/stream` | NDJSON 流式回复，只有 `final` 落盘 |
+| GET | `/ws?role=agent&agent=&token=` | WebSocket 升级，唤醒推送 + 流式 |
+
+### 讨论
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/api/discussions` | 创建讨论 |
+| GET | `/api/discussions` | 列出全部 |
+| GET | `/api/discussions/:id` | 查单场，含逐轮记录 |
+| POST | `/api/discussions/:id/stop` | 停止 |
 
 最小 agent 实现（纯 shell）：
 
@@ -317,12 +395,12 @@ done
 ## 项目结构
 
 ```
-server/           Hub（HTTP + SSE + 长轮询 + 消息存储）
+server/           Hub（HTTP + SSE + 长轮询 + WebSocket + 流式 + 消息存储）
   adapters/       5 个内置 driver，push 和 connector 共用
   surfaces.mjs    工作台数据源
 public/           前端（无框架、无构建）
 connectors/       agent 侧客户端
-docs/             架构 / 协议 / 部署
+docs/             架构 / 协议 / 部署 / 讨论
 examples/         各 harness 的接入样例
 ```
 
@@ -332,7 +410,7 @@ examples/         各 harness 的接入样例
 
 | 决策 | 原因 |
 |---|---|
-| **HTTP 长轮询而非 WebSocket** | `curl` 就能接；任何语言、任何 harness；穿代理和 NAT |
+| **长轮询打底，WebSocket / 流式可选** | 长轮询 `curl` 就能接、穿代理和 NAT；需要低延迟再升级，不升级也能用 |
 | **零依赖** | 部署只要 Node；没有 `npm audit`、没有供应链 |
 | **JSONL 消息日志** | append-only，不丢写，`tail -f` 可读 |
 | **token 派生而非存储** | 没有表要同步，轮换是原子的 |
