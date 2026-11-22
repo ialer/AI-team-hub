@@ -229,6 +229,7 @@ function messageEl(m) {
     + (m.from === 'human' ? ' from-human' : '')
     + (m.from === 'system' ? ' from-system' : '');
   article.id = 'm' + m.id;
+  if (m.truncated) article.dataset.truncated = '1';
 
   article.innerHTML = `
     <div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(initial)}</div>
@@ -637,7 +638,16 @@ function connectStream() {
     el.sub.textContent = '连接断开，重连中…';
   });
 
-  es.addEventListener('message', (e) => appendMessage(JSON.parse(e.data)));
+  es.addEventListener('message', (e) => {
+    const m = JSON.parse(e.data);
+    if (m.from && streams.has(m.from)) onStreamEnd({ from: m.from });
+    appendMessage(m);
+  });
+
+  es.addEventListener('stream_start', (e) => onStreamStart(JSON.parse(e.data)));
+  es.addEventListener('delta', (e) => onDelta(JSON.parse(e.data)));
+  es.addEventListener('tool', (e) => onTool(JSON.parse(e.data)));
+  es.addEventListener('stream_end', (e) => onStreamEnd(JSON.parse(e.data)));
 
   es.addEventListener('presence', (e) => {
     const { agents } = JSON.parse(e.data);
@@ -757,6 +767,85 @@ el.filePicker.addEventListener('change', () => {
   for (const f of [...el.filePicker.files]) uploadImage(f);
   el.filePicker.value = '';
 });
+
+/* ══════════════════════════════════════════════════════
+   Streaming turns
+   A live agent reply is rendered as a normal message that grows. Nothing is
+   persisted until the stream ends, so an interrupted turn is not frozen into
+   history as a half sentence.
+   ══════════════════════════════════════════════════════ */
+
+const streams = new Map(); // agentId -> { el, bubble, buffer, tools }
+
+function streamEl(agentId, name, color) {
+  const who = whoOf(agentId);
+  const initial = (who.name || '?').slice(0, 1).toUpperCase();
+
+  const article = document.createElement('article');
+  article.className = 'msg streaming';
+  article.innerHTML = `
+    <div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(initial)}</div>
+    <div class="body">
+      <div class="meta">
+        <span class="who" style="--c:${who.color}">${escapeHtml(who.name)}</span>
+        <span class="role">${escapeHtml(who.role || '')}</span>
+        <span class="role stream-badge">生成中</span>
+      </div>
+      <div class="bubble"><span class="stream-text"></span><span class="caret" aria-hidden="true"></span></div>
+      <div class="stream-tools"></div>
+    </div>`;
+  return article;
+}
+
+function onStreamStart(data) {
+  const { from, msgId, name } = data || {};
+  if (!from) return;
+  streams.get(from)?.el.remove();
+  const node = streamEl(from, name);
+  node.dataset.agent = from;
+  el.list.querySelector('.empty')?.remove();
+  el.list.appendChild(node);
+  streams.set(from, { el: node, bubble: node.querySelector('.stream-text'), tools: node.querySelector('.stream-tools'), buffer: '' });
+  scrollIfNearBottom();
+}
+
+function onDelta(data) {
+  const { from, text } = data || {};
+  if (!from || typeof text !== 'string') return;
+  let s = streams.get(from);
+  if (!s) {
+    onStreamStart({ from });
+    s = streams.get(from);
+  }
+  if (!s) return;
+  s.buffer += text;
+  // Render the accumulated text so markdown (code fences, bold) keeps working
+  // while streaming instead of flashing raw asterisks at the reader.
+  s.bubble.innerHTML = renderMarkdown(s.buffer);
+  scrollIfNearBottom();
+}
+
+function onTool(data) {
+  const { from, name, detail } = data || {};
+  const s = streams.get(from);
+  if (!s) return;
+  const chip = document.createElement('div');
+  chip.className = 'tool-chip';
+  chip.innerHTML = `<span class="tool-name">🔧 ${escapeHtml(name || 'tool')}</span>
+    <span class="tool-detail">${escapeHtml(String(detail || '').slice(0, 120))}</span>`;
+  s.tools.appendChild(chip);
+  scrollIfNearBottom();
+}
+
+function onStreamEnd(data) {
+  const { from } = data || {};
+  const s = streams.get(from);
+  if (!s) return;
+  // The authoritative message arrives separately; drop the live node so the
+  // persisted one (with timestamp, id, refs) takes its place.
+  s.el.remove();
+  streams.delete(from);
+}
 
 /* ══════════════════════════════════════════════════════
    Send
@@ -915,6 +1004,10 @@ if (!CSS.supports('container-type', 'scroll-state')) {
     el.toBottom.classList.toggle('show', away);
   }, { passive: true });
 }
+
+/* Debug hook — handy when a live stream misbehaves and the console is the
+   only window into module scope. Read-only by convention. */
+window.__hub = { state, streams, el };
 
 /* ── boot ── */
 (async () => {

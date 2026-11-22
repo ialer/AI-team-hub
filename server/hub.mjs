@@ -23,6 +23,7 @@ export class Hub {
 
     this.resolveMentions = createMentionResolver(config.agents);
     this.inFlight = new Map(); // agentId -> { msgId, startedAt, timer }
+    this.streams = new Map();  // agentId -> live stream buffer
   }
 
   /* ── reads ────────────────────────────────────────────── */
@@ -241,6 +242,94 @@ export class Hub {
       this.sse.broadcast('typing', { who: agentId, on: false });
       this.log.line(`${agentId} went offline with a queued wake; kept for reconnect`);
     }
+  }
+
+  /* ── streaming ────────────────────────────────────────── */
+
+  /**
+   * A streaming turn started. The partial text lives in memory and is pushed to
+   * browsers on every delta; nothing is written to the log until it ends, so a
+   * dropped stream never leaves a half sentence in history.
+   */
+  beginStream(agentId, msgId, room) {
+    if (!this.registry.get(agentId)) throw new Error(`unknown agent ${agentId}`);
+    this.clearInFlight(agentId, 'stream');
+    this.markInFlight(agentId, msgId, 'streaming');
+
+    const stream = {
+      agentId,
+      msgId,
+      room: room || this.notificationRoom(agentId),
+      text: '',
+      startedAt: Date.now(),
+      tools: [],
+    };
+    this.streams.set(agentId, stream);
+    this.sse.broadcast('typing', { who: agentId, on: true });
+    this.sse.broadcast('stream_start', {
+      from: agentId, msgId, room: stream.room,
+      name: this.displayName(agentId),
+    });
+    return stream;
+  }
+
+  /** Push one incremental chunk to every browser watching. */
+  appendDelta(agentId, text) {
+    const stream = this.streams.get(agentId);
+    if (!stream) return null;
+    stream.text += text;
+    this.sse.broadcast('delta', { from: agentId, msgId: stream.msgId, text });
+    return stream;
+  }
+
+  /** Record a tool call so the UI can show what the agent is doing. */
+  appendTool(agentId, name, detail) {
+    const stream = this.streams.get(agentId);
+    if (!stream) return null;
+    stream.tools.push({ name, detail });
+    this.sse.broadcast('tool', {
+      from: agentId, msgId: stream.msgId, name: String(name || ''), detail: String(detail || ''),
+    });
+    return stream;
+  }
+
+  /**
+   * Finish a streaming turn: persist one message with the full text.
+   * If the agent never sent a final block, whatever arrived is used and the
+   * message is flagged `truncated` so the reader knows it was cut short.
+   */
+  endStream(agentId, { text, sessionId, truncated = false } = {}) {
+    const stream = this.streams.get(agentId);
+    this.streams.delete(agentId);
+    this.clearInFlight(agentId, 'stream');
+    this.sse.broadcast('typing', { who: agentId, on: false });
+
+    if (!stream) return null;
+    const body = (typeof text === 'string' && text) || stream.text;
+    if (sessionId) this.registry.markSeen(agentId, { online: true, sessionId });
+
+    const message = this.messages.append({
+      room: stream.room,
+      from: agentId,
+      text: body,
+      mentions: this.resolveMentions(body),
+      replyTo: stream.msgId || null,
+      kind: 'chat',
+      origin: 'agent',
+      ...(truncated ? { truncated: true } : {}),
+    });
+    this.sse.broadcast('message', message);
+    this.sse.broadcast('stream_end', { from: agentId, msgId: message.id });
+    this.log.line(`stream ${agentId} → ${body.length} chars${truncated ? ' (truncated)' : ''}`);
+
+    this.wake(message);
+    return message;
+  }
+
+  /** Read the accumulated text of a live stream (used by the HTTP handler). */
+  streamText(agentId) {
+    const s = this.streams.get(agentId);
+    return s ? s.text : '';
   }
 
   /** A hub-authored notice (failures, timeouts). Never wakes anyone. */

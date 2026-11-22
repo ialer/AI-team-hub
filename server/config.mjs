@@ -25,6 +25,8 @@ const DEFAULTS = {
   sseKeepAliveMs: 20000,
   // Agent long-poll ceiling (seconds). Agents re-issue after each reply.
   pollTimeout: 50,
+  // A streaming turn with no delta for this long is closed as truncated.
+  streamIdleTimeout: 60,
   agents: [],
 };
 
@@ -46,6 +48,7 @@ function envOverrides() {
     HUB_DEFAULT_ROOM: ['defaultRoom', String],
     HUB_CONTEXT_WINDOW: ['contextWindow', Number],
     HUB_WAKE_TIMEOUT: ['wakeTimeout', Number],
+    HUB_STREAM_IDLE_TIMEOUT: ['streamIdleTimeout', Number],
     HUB_ADMIN_TOKEN: ['adminToken', String],
   };
   for (const [envKey, [key, cast]] of Object.entries(map)) {

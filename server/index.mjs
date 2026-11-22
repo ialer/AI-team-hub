@@ -326,6 +326,96 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    /* ── agent: streaming turn ──
+       POST a body of newline-delimited JSON chunks:
+         {"type":"delta","text":"..."}
+         {"type":"tool","name":"read_file","detail":"/var/log/app.log"}
+         {"type":"final","text":"...","sessionId":"..."}
+       Every delta is forwarded to browsers immediately; only the final text is
+       written to the log. Works with `curl -N --data-binary @-`. */
+    if (p === '/api/agent/stream' && req.method === 'POST') {
+      const agent = authenticateAgent(url, req);
+      const room = req.headers['x-room'] || url.searchParams.get('room') || config.defaultRoom;
+      const msgId = Number(req.headers['x-msg-id'] || url.searchParams.get('msgId') || 0) || null;
+
+      hub.beginStream(agent.id, msgId, room);
+
+      let pending = '';
+      let sawFinal = false;
+      let finalText = '';
+      let finalSession = '';
+      let finished = false;
+
+      // A stream that stalls must not leave the agent marked busy forever.
+      let idleTimer = null;
+      const armIdle = () => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          if (finished) return;
+          finished = true;
+          hub.endStream(agent.id, { text: hub.streamText(agent.id), truncated: true });
+          log.line(`stream ${agent.id} idle timeout`);
+        }, (config.streamIdleTimeout || 60) * 1000);
+        idleTimer.unref?.();
+      };
+      armIdle();
+
+      try {
+        for await (const chunk of req) {
+          pending += chunk.toString('utf8');
+          let nl;
+          while ((nl = pending.indexOf('\n')) >= 0) {
+            const line = pending.slice(0, nl).trim();
+            pending = pending.slice(nl + 1);
+            if (!line) continue;
+
+            let evt;
+            try { evt = JSON.parse(line); } catch { continue; }
+            armIdle();
+
+            if (evt.type === 'delta') {
+              hub.appendDelta(agent.id, String(evt.text || ''));
+            } else if (evt.type === 'tool') {
+              hub.appendTool(agent.id, evt.name, evt.detail || evt.arg || '');
+            } else if (evt.type === 'final') {
+              sawFinal = true;
+              finalText = String(evt.text ?? hub.streamText(agent.id));
+              finalSession = evt.sessionId || '';
+            }
+          }
+        }
+      } catch (e) {
+        log.line(`stream ${agent.id} read error: ${e.message}`);
+      }
+
+      // A trailing chunk without a newline still counts.
+      const tail = pending.trim();
+      if (tail) {
+        try {
+          const evt = JSON.parse(tail);
+          if (evt.type === 'delta') hub.appendDelta(agent.id, String(evt.text || ''));
+          if (evt.type === 'final') {
+            sawFinal = true;
+            finalText = String(evt.text ?? hub.streamText(agent.id));
+            finalSession = evt.sessionId || '';
+          }
+        } catch { /* ignore a torn tail */ }
+      }
+
+      clearTimeout(idleTimer);
+      if (!finished) {
+        finished = true;
+        const message = hub.endStream(agent.id, {
+          text: sawFinal ? finalText : hub.streamText(agent.id),
+          sessionId: finalSession,
+          truncated: !sawFinal,
+        });
+        if (finalSession) sessions.set(agent.id, finalSession);
+        return sendJson(res, 200, { ok: true, message });
+      }
+      return sendJson(res, 200, { ok: true });
+    }
+
     /* ── workspace surfaces ── */
     if (p === '/api/surfaces' && req.method === 'GET') {
       return sendJson(res, 200, { surfaces: surfaces.list() });
