@@ -878,6 +878,24 @@ textarea::placeholder { color: var(--text-faint); }
   }
 }
 
+@media (pointer: coarse) {
+  /* Icon buttons and the attach control are below the 44 px comfortable
+     touch target; grow them only where the pointer is a finger. */
+  .icon-btn, .attach { width: var(--target); height: var(--target); }
+  .emoji-cell { min-block-size: var(--target); }
+  .panel-tab { min-block-size: var(--target); }
+}
+
+@media (max-width: 860px) {
+  /* Keep a readable measure on phones: a bubble that touches both edges is hard
+     to scan and leaves no room for the avatar. */
+  .bubble { max-width: 86%; }
+  .msg.self .bubble { margin-left: auto; }
+  .discuss-bar { margin: 8px 12px 0; padding: 8px 12px; flex-wrap: wrap; }
+  .discuss-bar .btn { margin-left: auto; }
+  .form-dialog .field-row { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 860px) {
   header {
     flex-wrap: wrap;
