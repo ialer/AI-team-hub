@@ -133,12 +133,20 @@ export class Hub {
     }
   }
 
-  /** Connector path: park a payload the agent will collect on its next poll. */
+  /** Connector path: hand the payload to a live WebSocket, else queue it. */
   wakeViaQueue(agent, message) {
     const payload = this.buildWakePayload(agent, message);
-    this.wakeQueue.push(agent.id, payload);
-    this.markInFlight(agent.id, message.id, 'queued');
+    // A connected agent gets it immediately; the poll queue is the fallback for
+    // agents that only speak HTTP.
+    const delivered = typeof this.wsSender === 'function' && this.wsSender(agent.id, payload);
+    if (!delivered) this.wakeQueue.push(agent.id, payload);
+    this.markInFlight(agent.id, message.id, delivered ? 'pushed-ws' : 'queued');
     this.sse.broadcast('typing', { who: agent.id, on: true });
+  }
+
+  /** Register the WebSocket delivery hook. Returns true when the agent is connected. */
+  setWsSender(fn) {
+    this.wsSender = fn;
   }
 
   /** Push path: call the adapter and post its reply back as a normal message. */
@@ -236,11 +244,11 @@ export class Hub {
    */
   agentWentOffline(agentId) {
     const entry = this.inFlight.get(agentId);
-    if (entry && entry.phase === 'queued') {
+    if (entry && (entry.phase === 'queued' || entry.phase === 'pushed-ws')) {
       clearTimeout(entry.timer);
       this.inFlight.delete(agentId);
       this.sse.broadcast('typing', { who: agentId, on: false });
-      this.log.line(`${agentId} went offline with a queued wake; kept for reconnect`);
+      this.log.line(`${agentId} went offline mid-turn; turns kept for reconnect`);
     }
   }
 

@@ -15,7 +15,20 @@
 export class SseHub {
   constructor({ keepAliveMs = 20000 } = {}) {
     this.clients = new Set();
+    this.subscribers = new Set(); // extra sinks (e.g. browser WebSocket clients)
     this.keepAliveMs = keepAliveMs;
+  }
+
+  /**
+   * Register a plain callback sink for every broadcast.
+   * Used by the WebSocket transport so browser sockets and SSE pages see the
+   * exact same event stream.
+   * @param {(event: string, data: unknown) => void} fn
+   * @returns {() => void} unsubscribe
+   */
+  subscribe(fn) {
+    this.subscribers.add(fn);
+    return () => this.subscribers.delete(fn);
   }
 
   /** Attach an http.ServerResponse as an SSE stream. */
@@ -61,6 +74,9 @@ export class SseHub {
       } catch {
         this.clients.delete(client);
       }
+    }
+    for (const fn of this.subscribers) {
+      try { fn(event, data); } catch { this.subscribers.delete(fn); }
     }
   }
 

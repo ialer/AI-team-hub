@@ -20,6 +20,7 @@ import { SseHub, WakeQueue } from './transport.mjs';
 import { Hub } from './hub.mjs';
 import { createSurfaces } from './surfaces.mjs';
 import { createStorage } from './storage.mjs';
+import { attachWebSocket } from './ws.mjs';
 import { assertImage, imageSize, contentHash, parseMultipart, MAX_UPLOAD_BYTES } from './media.mjs';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
@@ -236,6 +237,13 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         agent: { id: agent.id, name: agent.name, mode: agent.mode },
         sessionId: registry.sessionFor(agent.id),
+        // Capability advertisement: an agent may switch to the socket and gain
+        // push delivery plus delta streaming on the same connection.
+        transports: {
+          poll: `/api/agent/poll?agent=${encodeURIComponent(agent.id)}`,
+          stream: '/api/agent/stream',
+          ws: `/ws?role=agent&agent=${encodeURIComponent(agent.id)}&token=<token>`,
+        },
       });
     }
 
@@ -444,6 +452,114 @@ server.listen(config.port, config.host, () => {
   log.line(`AI Team Hub listening on http://${config.host}:${config.port}`);
   log.line(`agents: ${config.agents.map((a) => `${a.id}(${a.mode})`).join(', ') || 'none configured'}`);
   if (!config.adminToken) log.line('WARNING: no adminToken set — agent tokens cannot be verified');
+});
+
+/* ── WebSocket transport ──
+   Optional. An agent that connects here gets wakes pushed instead of polled and
+   can stream deltas over the same socket. Agents that only speak HTTP are
+   unaffected — the poll queue remains the fallback. */
+const wsAgents = new Map(); // agentId -> WsConnection
+
+attachWebSocket(server, {
+  path: '/ws',
+  authorize(req, url) {
+    const role = url.searchParams.get('role') || 'agent';
+    if (role !== 'agent') return true; // browser sockets need no token
+    const id = url.searchParams.get('agent') || '';
+    const token = url.searchParams.get('token') || '';
+    return Boolean(registry.get(id)) && registry.verify(id, token);
+  },
+  onConnection(conn, req, url) {
+    const role = url.searchParams.get('role') || 'agent';
+
+    if (role !== 'agent') {
+      // Browser socket: identical event feed to SSE, for clients that prefer WS.
+      const unsubscribe = sse.subscribe((event, data) => conn.sendJSON({ event, data }));
+      conn.sendJSON({ event: 'hello', data: { transport: 'ws', role: 'browser' } });
+      conn.on('close', unsubscribe);
+      return;
+    }
+
+    /* ── agent role ── */
+    const agentId = url.searchParams.get('agent');
+    const agent = registry.get(agentId);
+    if (!agent) { conn.close(1008, 'unknown agent'); return; }
+
+    wsAgents.set(agentId, conn);
+    registry.markSeen(agentId, { online: true });
+    sse.broadcast('presence', { agents: registry.publicView() });
+    log.line(`ws connect ${agentId}`);
+
+    conn.sendJSON({ event: 'hello', data: { transport: 'ws', agent: agentId } });
+
+    let streamRoom = null;
+
+    conn.on('message', (raw) => {
+      let msg;
+      try { msg = JSON.parse(raw); } catch { return; }
+      const type = msg.type;
+
+      try {
+        if (type === 'ack') {
+          registry.markSeen(agentId, { online: true });
+          return;
+        }
+        if (type === 'session') {
+          if (msg.sessionId) {
+            registry.markSeen(agentId, { online: true, sessionId: msg.sessionId });
+            sessions.set(agentId, msg.sessionId);
+          }
+          return;
+        }
+        if (type === 'begin') {
+          streamRoom = msg.room || config.defaultRoom;
+          hub.beginStream(agentId, msg.msgId || null, streamRoom);
+          return;
+        }
+        if (type === 'delta') {
+          if (!hub.streams.has(agentId)) hub.beginStream(agentId, msg.msgId || null, streamRoom);
+          hub.appendDelta(agentId, String(msg.text || ''));
+          return;
+        }
+        if (type === 'tool') {
+          if (!hub.streams.has(agentId)) hub.beginStream(agentId, msg.msgId || null, streamRoom);
+          hub.appendTool(agentId, msg.name, msg.detail || '');
+          return;
+        }
+        if (type === 'final') {
+          const message = hub.endStream(agentId, {
+            text: String(msg.text ?? hub.streamText(agentId)),
+            sessionId: msg.sessionId || '',
+          });
+          if (msg.sessionId) sessions.set(agentId, msg.sessionId);
+          conn.sendJSON({ event: 'saved', data: { id: message && message.id } });
+          streamRoom = null;
+          return;
+        }
+        if (type === 'reply') {
+          hub.reply({ agentId, msgId: msg.msgId, text: String(msg.text || ''), sessionId: msg.sessionId });
+          return;
+        }
+      } catch (e) {
+        conn.sendJSON({ event: 'error', data: { message: String(e.message) } });
+      }
+    });
+
+    conn.on('close', () => {
+      if (wsAgents.get(agentId) === conn) wsAgents.delete(agentId);
+      const remaining = registry.removeConnection(agentId);
+      if (remaining <= 0) hub.agentWentOffline(agentId);
+      sse.broadcast('presence', { agents: registry.publicView() });
+      log.line(`ws disconnect ${agentId}`);
+    });
+  },
+});
+
+// Deliver wakes over WS when the agent is connected.
+hub.setWsSender((agentId, payload) => {
+  const conn = wsAgents.get(agentId);
+  if (!conn || conn.closed) return false;
+  return conn.sendJSON({ event: 'wake', data: payload });
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

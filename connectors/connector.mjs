@@ -63,6 +63,97 @@ function makeLog(verbose) {
   };
 }
 
+/* ══════════════════════════════════════════════════════
+   Transports
+   Two ways to receive a wake. Both hand the same payload to `onWake`, so the
+   driver code below never knows which one is in use.
+   ══════════════════════════════════════════════════════ */
+
+/** Long poll: works anywhere, including a shell with curl. */
+function startPollTransport({ hubBase, agentId, auth, onWake, log, stopFlag, once = false }) {
+  return (async () => {
+    while (!stopFlag.stopping) {
+      let payload;
+      try {
+        const res = await fetch(
+          `${hubBase}/api/agent/poll?agent=${encodeURIComponent(agentId)}`,
+          { headers: auth, signal: AbortSignal.timeout(90_000) },
+        );
+        const text = await res.text();
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${text.slice(0, 120)}`);
+        payload = JSON.parse(text);
+      } catch (e) {
+        log(`poll error: ${e.message}`);
+        await sleep(3000);
+        continue;
+      }
+
+      for (const ev of payload.events || []) {
+        if (stopFlag.stopping) break;
+        await onWake(ev, { sessionId: payload.sessionId });
+      }
+
+      if (once) return;
+    }
+  })();
+}
+
+/**
+ * WebSocket: lower latency and lets the agent stream deltas on the same socket.
+ * Requires a global WebSocket (Node 22+). Returns null when unavailable so the
+ * caller can silently fall back to polling.
+ */
+function startWsTransport({ hubBase, agentId, token, onWake, log, stopFlag }) {
+  if (typeof WebSocket !== 'function') return null;
+
+  const wsUrl = hubBase.replace(/^http/, 'ws')
+    + `/ws?role=agent&agent=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}`;
+
+  const state = { ws: null, ready: false, stopped: false };
+
+  const connect = () => {
+    if (stopFlag.stopping) return;
+    const ws = new WebSocket(wsUrl);
+    state.ws = ws;
+
+    ws.addEventListener('open', () => {
+      state.ready = true;
+      log('ws connected');
+    });
+
+    ws.addEventListener('message', async (e) => {
+      let frame;
+      try { frame = JSON.parse(e.data); } catch { return; }
+      if (frame.event === 'hello') return;
+      if (frame.event !== 'wake') return;
+      try {
+        await onWake(frame.data, { sessionId: frame.data.sessionId });
+      } catch (err) {
+        log(`wake handler error: ${err.message}`);
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      state.ready = false;
+      if (stopFlag.stopping) return;
+      log('ws closed, reconnecting in 3s');
+      setTimeout(connect, 3000);
+    });
+
+    ws.addEventListener('error', () => {
+      // 'close' fires next and drives the reconnect.
+    });
+  };
+
+  connect();
+
+  return {
+    state,
+    stop() { state.stopped = true; try { state.ws?.close(); } catch { /* gone */ } },
+    isReady: () => state.ready,
+  };
+}
+
 /* ── main ─────────────────────────────────────────────── */
 async function main() {
   const args = parseArgv(process.argv.slice(2));
@@ -109,38 +200,45 @@ async function main() {
   log(`hello ok (session=${sessionId || 'none'})`);
 
   let stopping = false;
+  const stopFlag = { get stopping() { return stopping; } };
   const stop = () => { stopping = true; log('stopping…'); };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
-  while (!stopping) {
-    let payload;
-    try {
-      payload = await api(
-        `/api/agent/poll?agent=${encodeURIComponent(agentId)}`,
-        { headers: auth },
-        90_000,
-      );
-    } catch (e) {
-      log(`poll error: ${e.message}`);
-      await sleep(3000);
-      continue;
-    }
+  /* Pick a transport.
+     `transport: "ws"` in the config forces WebSocket; otherwise the connector
+     uses it when the runtime has a global WebSocket, and silently falls back to
+     long polling when it does not (Node < 22, or a blocked upgrade). */
+  const wantWs = cfg.transport === 'ws' || cfg.transport === undefined;
+  let wsTransport = null;
+  if (wantWs) wsTransport = startWsTransport({
+    hubBase, agentId, token,
+    log,
+    stopFlag,
+    onWake: (ev, meta) => handleWake(ev, meta),
+  });
 
-    if (payload.sessionId && payload.sessionId !== sessionId) sessionId = payload.sessionId;
-
-    for (const ev of payload.events || []) {
-      if (stopping) break;
-      await handleWake(ev);
-    }
-
-    if (args.once) break;
+  if (wsTransport && !args.once) {
+    log('transport: websocket');
+    await new Promise((resolve) => {
+      const tick = setInterval(() => {
+        if (stopping) { clearInterval(tick); wsTransport.stop(); resolve(); }
+      }, 200);
+      tick.unref?.();
+    });
+  } else {
+    wsTransport?.stop();
+    log('transport: long-poll');
+    await startPollTransport({
+      hubBase, agentId, auth, log, stopFlag, once: args.once,
+      onWake: (ev, meta) => handleWake(ev, meta),
+    });
   }
 
   log('connector stopped');
 
   /* ── one wake → one reply ───────────────────────────── */
-  async function handleWake(ev) {
+  async function handleWake(ev, meta = {}) {
     const started = Date.now();
     log(`wake #${ev.msgId} from ${ev.from}: ${String(ev.text || '').slice(0, 60)}`);
     try {

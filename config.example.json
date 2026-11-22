@@ -29,7 +29,7 @@
       }
     }
   },
-  "_comment_agents": "mode=connector → the agent dials in and long-polls (recommended, NAT-friendly). mode=push → the hub calls out via an adapter.",
+  "_comment_agents": "mode=connector → the agent dials in (long-poll or websocket). mode=push → the hub calls out via an adapter. Connector agents get WebSocket push automatically when the runtime has a global WebSocket; set transport: poll in the connector config to force polling.",
 
   "agents": [
     {
