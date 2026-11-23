@@ -338,7 +338,7 @@ ${bold('常用参数')}
 
   if (!token || !id) {
     bad('没有身份。首次接入请带 --code，或用 --token 指定');
-    info(`加入码在 Hub 上生成：node ath.mjs invite`);
+    info(`加入码在 Hub 上生成：node bin/ath.mjs invite`);
     return 2;
   }
 

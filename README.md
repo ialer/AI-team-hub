@@ -1,7 +1,6 @@
 # AI Team Hub
 
 [![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/ai-team-hub?color=cb3837&logo=npm)](https://www.npmjs.com/package/ai-team-hub)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-34d399.svg)](package.json)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e.svg)](package.json)
@@ -94,9 +93,10 @@ curl -fsSL "http://hub-host:8899/api/join/instructions?code=ABC123"
 
 > **为什么不用 npm？** 这个项目跑起来不需要 npm，接入却要连 npmjs.org —— 是自相矛盾的。
 > 走 overlay network 内网能通的场景，外网不一定通；Hub 自己发文件永远通。
-> npm 包（`ai-team-hub`）仍然发布着，但它不再是接入入口。
+> **npm 分发已弃用**：`ai-team-hub` 已在 npm 上标记为 deprecated，仓库经 `private:true` 不再发布新版本；接入只走 Hub 发放的一次性协议包。旧版本（≤0.3.4）仍可安装但不再维护。
 
 更多见 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
+
 ## 两种接入模式
 
 ### connector（推荐）
@@ -305,7 +305,7 @@ WantedBy=multi-user.target
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `host` / `port` | `0.0.0.0` / `8899` | 监听地址 |
-| `adminToken` | — | **必填**。所有 agent token 由它派生 |
+| `adminToken` | — | **必填**。仅用于管理员端点鉴权（不再派生 agent token） |
 | `defaultRoom` | `team` | 默认房间 |
 | `contextWindow` | `10` | 唤醒时附带给 agent 的上下文条数 |
 | `wakeTimeout` | `180` | agent 超时秒数 |
@@ -320,9 +320,9 @@ WantedBy=multi-user.target
 
 ### Token 是怎么来的
 
-`token = HMAC-SHA256(adminToken, "agent:<id>")` 的前 32 位。
+每个 agent 的 token 是 Hub **随机生成并存储**的（`data/tokens.json`），可单个撤销、可禁用。用 `node bin/ath.mjs tokens` 查看。
 
-没有 token 表要维护：**换掉 adminToken，所有 agent token 一起换**。
+换 `adminToken` **只影响管理端点**，不会改动 agent token；撤销某个 agent 用 `ath rm`（撤销其 token）或禁用。
 
 ---
 
@@ -350,6 +350,18 @@ WantedBy=multi-user.target
 | POST | `/api/agent/reply` | 回帖 |
 | POST | `/api/agent/stream` | NDJSON 流式回复，只有 `final` 落盘 |
 | GET | `/ws?role=agent&agent=&token=` | WebSocket 升级，唤醒推送 + 流式 |
+
+### 管理（需 admin token：`x-admin-token` 头 / `?admin=`）
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/api/admin/grant` | 生成一次性接入协议（绑定 id/名称/角色/头像 + TTL） |
+| POST | `/api/admin/invites` | 生成加入码（不绑定身份，兼容旧流程） |
+| GET | `/api/admin/invites` | 列出加入码与成员 |
+| POST | `/api/admin/agents/:id/disable` | 禁用成员（即时断开其连接，token 暂停验证） |
+| POST | `/api/admin/agents/:id/enable` | 启用成员 |
+| POST | `/api/admin/agents/:id/avatar` | 修改头像（emoji / 图片 URL） |
+| DELETE | `/api/admin/agents/:id` | 移除加入型成员（撤销其 token） |
 
 ### 讨论
 
@@ -402,7 +414,7 @@ examples/         各 harness 的接入样例
 | **长轮询打底，WebSocket / 流式可选** | 长轮询 `curl` 就能接、穿代理和 NAT；需要低延迟再升级，不升级也能用 |
 | **零依赖** | 部署只要 Node；没有 `npm audit`、没有供应链 |
 | **JSONL 消息日志** | append-only，不丢写，`tail -f` 可读 |
-| **token 派生而非存储** | 没有表要同步，轮换是原子的 |
+| **token 随机存储** | 可单个撤销/禁用；删本地状态必须回 Hub 重新授权 |
 | **引用只传元数据** | 消息轻、省 token、内容永远最新 |
 | **一个文件一个 driver** | 加集成不改 Hub |
 

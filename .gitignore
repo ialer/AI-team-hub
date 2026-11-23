@@ -20,3 +20,6 @@ pnpm-lock.yaml
 Thumbs.db
 .idea/
 .vscode/
+# local backups
+*.bak-*
+prototype/

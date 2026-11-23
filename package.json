@@ -24,24 +24,10 @@
     "start": "node server/index.mjs",
     "dev": "node --watch server/index.mjs",
     "connect": "node connectors/connector.mjs",
-    "lint": "node --check server/index.mjs && node --check connectors/connector.mjs",
+    "lint": "node -e \"const{execSync}=require('child_process');const{readdirSync,statSync}=require('fs');const walk=(d,o=[])=>{for(const n of readdirSync(d)){const f=d+'/'+n;if(n==='node_modules')continue;statSync(f).isDirectory()?walk(f,o):(n.endsWith('.mjs')&&o.push(f))}return o};for(const f of walk('server').concat(walk('connectors'))){execSync('node --check '+JSON.stringify(f),{stdio:'inherit'})};console.log('syntax ok')\"",
     "test": "node --test",
-    "tokens": "node server/tokens.mjs",
-    "prepublishOnly": "node --test && node -e \"const p=require('./package.json');if(Object.keys(p.dependencies||{}).length){console.error('runtime dependencies are not allowed');process.exit(1)}\""
+    "tokens": "node server/tokens.mjs"
   },
-  "files": [
-    "bin",
-    "server",
-    "public",
-    "connectors",
-    "docs",
-    "examples",
-    "README.md",
-    "CONTRIBUTING.md",
-    "LICENSE",
-    "config.example.json",
-    ".env.example"
-  ],
   "keywords": [
     "ai-agents",
     "multi-agent",
@@ -58,8 +44,5 @@
     "cli",
     "onboarding"
   ],
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  }
+  "private": true
 }
