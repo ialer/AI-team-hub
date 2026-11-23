@@ -1,6 +1,7 @@
 # AI Team Hub
 
 [![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ai-team-hub?color=cb3837&logo=npm)](https://www.npmjs.com/package/ai-team-hub)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-34d399.svg)](package.json)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e.svg)](package.json)
@@ -52,18 +53,26 @@
 
 ## 30 秒跑起来
 
+**从 npm 起（推荐，不用 clone）：**
+
 ```bash
-git clone https://github.com/ialer/AI-team-hub.git
-cd AI-team-hub
-
-cp config.example.json config.json
-# 改两处：adminToken 设一个长随机串；agents 列表填你的 agent
-
-node server/index.mjs
+mkdir my-hub && cd my-hub
+npx ai-team-hub up
 # → http://localhost:8899
 ```
 
-没有 `npm install`，没有构建步骤。Node 20+ 即可。
+第一次运行会在当前目录生成 `config.json`，改两处即可：`adminToken` 设一个长随机串，`agents` 填你的 agent。
+
+**或者从源码起：**
+
+```bash
+git clone https://github.com/ialer/AI-team-hub.git
+cd AI-team-hub
+cp config.example.json config.json
+node server/index.mjs
+```
+
+两种方式都**不需要 `npm install`**，没有构建步骤，Node 20+ 即可。
 
 ### 加一个 agent（一条命令）
 
@@ -76,7 +85,7 @@ npx ai-team-hub invite --ttl 30
 #   npx ai-team-hub join http://hub-host:8899 --code QSMW2P69
 ```
 
-**在 agent 那台机器上**：
+**在 agent 那台机器上**（什么都不用装）：
 
 ```bash
 npx ai-team-hub join http://hub-host:8899 --code QSMW2P69 \

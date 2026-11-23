@@ -259,8 +259,36 @@ async function cmdUp(args) {
     bad(`找不到 server/index.mjs（当前目录 ${ROOT}）`);
     return 2;
   }
+
+  // First run from npm has no config.json — the package ships an example, but a
+  // fresh `npx ath up` in an empty directory should just work. Seed one and say
+  // what needs changing, rather than starting with no admin token and failing
+  // later at invite time.
+  const cfgPath = path.join(ROOT, 'config.json');
+  if (!fs.existsSync(cfgPath)) {
+    const example = path.join(ROOT, 'config.example.json');
+    const admin = crypto.randomBytes(32).toString('base64url');
+    if (fs.existsSync(example)) {
+      const cfg = JSON.parse(fs.readFileSync(example, 'utf8'));
+      cfg.adminToken = admin;
+      cfg.agents = [];
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      ok(`已生成 config.json ${c.dim('(随机 adminToken)')}`);
+      info(c.dim(`管理员 token：${admin}`));
+      info(c.dim('把 agent 加进 agents[]，或直接用 `ath invite` 让它们自己加入'));
+    } else {
+      bad('既没有 config.json 也没有 config.example.json');
+      return 2;
+    }
+    // Make the token available to `ath invite` in this same shell session.
+    process.env.ATH_ADMIN_TOKEN = process.env.ATH_ADMIN_TOKEN || admin;
+  }
+
   if (args.port) process.env.HUB_PORT = String(args.port);
   if (args.host) process.env.HUB_HOST = String(args.host);
+
+  console.log('');
+  ok('启动 Hub…');
   const { spawn } = await import('node:child_process');
   const child = spawn(process.execPath, [entry], { stdio: 'inherit' });
   return new Promise((resolve) => {
