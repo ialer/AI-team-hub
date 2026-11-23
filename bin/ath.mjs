@@ -99,7 +99,9 @@ function resolveHub(explicit) {
   } catch { /* no saved agent on this machine */ }
 
   try {
-    const hubCfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    // Prefer the operator's working directory: under npx, ROOT is a cache dir.
+    const localCfg = path.join(process.cwd(), 'config.json');
+    const hubCfg = JSON.parse(fs.readFileSync(fs.existsSync(localCfg) ? localCfg : path.join(ROOT, 'config.json'), 'utf8'));
     const host = hubCfg.host && hubCfg.host !== '0.0.0.0' ? hubCfg.host : '127.0.0.1';
     const port = hubCfg.port || 8899;
     return `http://${host}:${port}`;
@@ -116,8 +118,8 @@ async function cmdInvite(args) {
   const admin =
     args.admin ||
     process.env.ATH_ADMIN_TOKEN ||
-    readEnvToken(path.join(ROOT, '.env'), 'HUB_ADMIN_TOKEN') ||
-    readEnvToken(path.join(process.cwd(), '.env'), 'HUB_ADMIN_TOKEN');
+    readEnvToken(path.join(process.cwd(), '.env'), 'HUB_ADMIN_TOKEN') ||
+    readEnvToken(path.join(ROOT, '.env'), 'HUB_ADMIN_TOKEN');
 
   if (!admin) {
     bad('需要管理员 token');
@@ -256,39 +258,44 @@ async function runConnect(file, args = {}) {
 async function cmdUp(args) {
   const entry = path.join(ROOT, 'server', 'index.mjs');
   if (!fs.existsSync(entry)) {
-    bad(`找不到 server/index.mjs（当前目录 ${ROOT}）`);
+    bad(`找不到 server/index.mjs（安装目录 ${ROOT}）`);
     return 2;
   }
 
-  // First run from npm has no config.json — the package ships an example, but a
-  // fresh `npx ath up` in an empty directory should just work. Seed one and say
-  // what needs changing, rather than starting with no admin token and failing
-  // later at invite time.
-  const cfgPath = path.join(ROOT, 'config.json');
+  // Everything the operator owns lives in the CURRENT directory, not in the
+  // place the package was installed. Under npx, ROOT is a throwaway cache dir
+  // that npm may delete at any time — writing config/data there means the hub
+  // forgets everything on the next run.
+  const workdir = process.cwd();
+  const cfgPath = path.join(workdir, 'config.json');
+  const dataDir = path.join(workdir, 'data');
+
   if (!fs.existsSync(cfgPath)) {
     const example = path.join(ROOT, 'config.example.json');
-    const admin = crypto.randomBytes(32).toString('base64url');
-    if (fs.existsSync(example)) {
-      const cfg = JSON.parse(fs.readFileSync(example, 'utf8'));
-      cfg.adminToken = admin;
-      cfg.agents = [];
-      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-      ok(`已生成 config.json ${c.dim('(随机 adminToken)')}`);
-      info(c.dim(`管理员 token：${admin}`));
-      info(c.dim('把 agent 加进 agents[]，或直接用 `ath invite` 让它们自己加入'));
-    } else {
-      bad('既没有 config.json 也没有 config.example.json');
+    if (!fs.existsSync(example)) {
+      bad('安装包里缺 config.example.json，无法初始化');
       return 2;
     }
-    // Make the token available to `ath invite` in this same shell session.
+    const admin = crypto.randomBytes(32).toString('base64url');
+    const cfg = JSON.parse(fs.readFileSync(example, 'utf8'));
+    cfg.adminToken = admin;
+    cfg.agents = [];
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    ok(`已生成 ${cfgPath} ${c.dim('(随机 adminToken)')}`);
+    info(c.dim(`管理员 token：${admin}`));
+    info(c.dim('用 `ath invite` 让 agent 自己加入，或把 agent 加进 agents[]'));
     process.env.ATH_ADMIN_TOKEN = process.env.ATH_ADMIN_TOKEN || admin;
   }
 
   if (args.port) process.env.HUB_PORT = String(args.port);
   if (args.host) process.env.HUB_HOST = String(args.host);
 
+  // Point the server at the operator's directory rather than the package dir.
+  process.env.HUB_CONFIG = cfgPath;
+  process.env.HUB_DATA_DIR = dataDir;
+
   console.log('');
-  ok('启动 Hub…');
+  ok(`启动 Hub ${c.dim(`(工作目录 ${workdir})`)}`);
   const { spawn } = await import('node:child_process');
   const child = spawn(process.execPath, [entry], { stdio: 'inherit' });
   return new Promise((resolve) => {
@@ -313,7 +320,7 @@ async function cmdRemove(args) {
   const id = args._[1] || args.id;
   if (!id) { bad('用法：ath rm <agent-id>'); return 2; }
   const hub = resolveHub(args.hub);
-  const admin = args.admin || process.env.ATH_ADMIN_TOKEN || readEnvToken(path.join(ROOT, '.env'), 'HUB_ADMIN_TOKEN');
+  const admin = args.admin || process.env.ATH_ADMIN_TOKEN || readEnvToken(path.join(process.cwd(), '.env'), 'HUB_ADMIN_TOKEN') || readEnvToken(path.join(ROOT, '.env'), 'HUB_ADMIN_TOKEN');
   if (!admin) { bad('需要管理员 token（--admin 或 ATH_ADMIN_TOKEN）'); return 2; }
   try {
     await api(hub, '/api/admin/agents/' + encodeURIComponent(id), { method: 'DELETE', admin });
