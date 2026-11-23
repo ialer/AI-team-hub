@@ -11,6 +11,8 @@
    State
    ══════════════════════════════════════════════════════ */
 
+import { mountMembersPanel } from './admin.js';
+
 const state = {
   me: localStorage.getItem('hub.identity') || 'human',
   room: 'team',
@@ -1111,6 +1113,7 @@ const SURFACES = [
   { id: 'docs', label: '文档' },
   { id: 'tasks', label: '任务' },
   { id: 'files', label: '文件' },
+  { id: 'members', label: '成员' },
 ];
 
 async function renderPanel() {
@@ -1118,15 +1121,28 @@ async function renderPanel() {
     `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}">${s.label}</button>`
   ).join('');
 
+  // Snapshot the requested surface: a fast tab switch bumps state.surface, and
+  // any in-flight render must not overwrite the panel the user is now looking at.
+  const want = state.surface;
+  const stale = () => state.surface !== want;
+
+  if (want === 'members') {
+    el.panelFoot.textContent = '';
+    await mountMembersPanel(el.panelBody, el.panelFoot);
+    return;
+  }
+
   el.panelBody.innerHTML = '<div class="empty" style="padding:24px">加载中…</div>';
   el.panelFoot.textContent = '点条目可加入下一条消息';
 
   try {
-    const r = await fetch(`/api/surface/${state.surface}`);
+    const r = await fetch(`/api/surface/${want}`);
+    if (stale()) return;
     if (!r.ok) throw new Error(r.status);
     const { items } = await r.json();
+    if (stale()) return;
     if (!items || !items.length) {
-      el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// ${state.surface} 还没有内容</div>`;
+      el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// ${want} 还没有内容</div>`;
       return;
     }
     el.panelBody.innerHTML = items.map((it) => `
@@ -1135,6 +1151,7 @@ async function renderPanel() {
         <span class="m">${escapeHtml(it.meta || '')}</span>
       </div>`).join('');
   } catch {
+    if (stale()) return;
     el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// 该 surface 暂不可用</div>`;
   }
 }
@@ -1147,6 +1164,7 @@ el.panelTabs.addEventListener('click', (e) => {
 });
 
 el.panelBody.addEventListener('click', (e) => {
+  if (state.surface === 'members') return;
   const item = e.target.closest('.surface-item');
   if (!item) return;
   addPendingRef({ surface: state.surface, id: item.dataset.id, title: item.dataset.title });

@@ -689,7 +689,7 @@ textarea::placeholder { color: var(--text-faint); }
   overflow: hidden;
   flex-direction: column;
 }
-.app.with-panel .panel { display: flex; }
+.app.with-panel .panel { display: flex; grid-column: 2; }
 
 .panel-tabs {
   display: flex; gap: 2px;
