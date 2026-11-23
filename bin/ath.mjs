@@ -439,7 +439,17 @@ async function main() {
     case 'tokens': return cmdTokens(args);
     case 'rm': case 'remove': return cmdRemove(args);
     case 'doctor': return cmdDoctor(args);
-    case 'version': case '-v': console.log('ai-team-hub 0.3.0'); return 0;
+case 'version': case '-v': {
+      // Read the real version from package.json. A hardcoded string here once
+      // printed 0.3.0 for three releases in a row and made it look like npm
+      // was serving a stale build.
+      let v = 'unknown';
+      try {
+        v = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+      } catch { /* keep the fallback */ }
+      console.log(`ai-team-hub ${v}`);
+      return 0;
+    }
     default:
       bad(`未知命令：${cmd}`);
       usage();
