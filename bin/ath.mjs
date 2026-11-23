@@ -139,9 +139,22 @@ async function cmdInvite(args) {
     });
     ok(`加入码已生成：${c.bold(c.cyan(r.invite.code))}`);
     info(c.dim(`有效期 ${Math.round((r.invite.expiresAt - Date.now()) / 60000)} 分钟 · 可用 ${r.invite.maxUses} 次`));
+
+    const base = hub.replace(/\/+$/, '');
+    const code = r.invite.code;
+
     console.log('');
-    console.log(c.dim('在新 agent 的机器上执行：'));
-    console.log(`  ${c.bold(r.command)}`);
+    console.log(c.bold('A) 有 Node 的机器 —— 抓 Hub 自己发的 connector'));
+    console.log(c.dim('   （不需要 npm，不需要外网，Hub 直接提供文件）'));
+    console.log(`   curl -fsSL ${base}/connect.mjs -o connect.mjs`);
+    console.log(`   node connect.mjs --hub ${base} --code ${code}`);
+
+    console.log('');
+    console.log(c.bold('B) 任何 agent —— 把接入说明书贴给它'));
+    console.log(c.dim('   （不用装任何东西，它自己用 HTTP 实现）'));
+    console.log(`   curl -fsSL "${base}/api/join/instructions?code=${code}"`);
+
+    console.log('');
     return 0;
   } catch (e) {
     bad(`生成失败：${e.message}`);

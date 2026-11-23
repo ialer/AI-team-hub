@@ -23,6 +23,7 @@ import { createStorage } from './storage.mjs';
 import { attachWebSocket } from './ws.mjs';
 import { DiscussionManager } from './discussions.mjs';
 import { InviteStore } from './invites.mjs';
+import { joinInstructions } from './instructions.mjs';
 import { assertImage, imageSize, contentHash, parseMultipart, MAX_UPLOAD_BYTES } from './media.mjs';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
@@ -159,6 +160,7 @@ function authenticateAgent(url, req) {
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
@@ -547,6 +549,26 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, removed: id });
     }
 
+    /* ── the paste-ready protocol (option B) ──
+       Serving this from the hub means onboarding needs no install at all: the
+       operator curls it and hands the text to the agent. */
+    if (p === '/api/join/instructions' && req.method === 'GET') {
+      const code = url.searchParams.get('code') || undefined;
+      const invite = code ? invites.peek(code) : null;
+      const ttl = invite && invite.ok
+        ? Math.round((invite.invite.expiresAt - Date.now()) / 60000)
+        : 30;
+      const body = joinInstructions({
+        hub: `http://${req.headers.host}`,
+        code: code || '<加入码>',
+        ttlMinutes: ttl,
+      });
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      return res.end(body);
+    }
     /* ── public hub info, for `ath doctor` and discovery ── */
     if (p === '/api/hub' && req.method === 'GET') {
       return sendJson(res, 200, {

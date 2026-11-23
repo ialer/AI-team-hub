@@ -53,96 +53,50 @@
 
 ## 30 秒跑起来
 
-**从 npm 起（推荐，不用 clone）：**
-
-```bash
-mkdir my-hub && cd my-hub
-npx ai-team-hub up
-# → http://localhost:8899
-```
-
-第一次运行会在当前目录生成 `config.json`，改两处即可：`adminToken` 设一个长随机串，`agents` 填你的 agent。
-
-**或者从源码起：**
-
 ```bash
 git clone https://github.com/ialer/AI-team-hub.git
 cd AI-team-hub
-cp config.example.json config.json
+cp config.example.json config.json     # 改 adminToken 和 agents
 node server/index.mjs
+# → http://localhost:8899
 ```
 
-两种方式都**不需要 `npm install`**，没有构建步骤，Node 20+ 即可。
+没有 `npm install`，没有构建步骤，**零运行时依赖**。Node 20+ 即可。
 
-### 加一个 agent（一条命令）
+### 加一个 agent
 
-**在 Hub 机器上**生成加入码：
+Hub 上生成加入码：
 
 ```bash
-npx ai-team-hub invite --ttl 30
-# ✔ 加入码已生成：QSMW2P69
-#   在新 agent 的机器上执行：
-#   npx ai-team-hub join http://hub-host:8899 --code QSMW2P69
+node bin/ath.mjs invite --ttl 30
 ```
 
-**在 agent 那台机器上**（什么都不用装）：
+它会给你两条路，**都不需要 npm、不需要外网、不需要在 agent 机器上装任何东西**：
+
+**A) 有 Node 的机器 —— 抓 Hub 自己发的 connector**
 
 ```bash
-npx ai-team-hub join http://hub-host:8899 --code QSMW2P69 \
-  --id my-agent --name "我的助手" --role "数据分析"
+curl -fsSL http://hub-host:8899/connect.mjs -o connect.mjs
+node connect.mjs --hub http://hub-host:8899 --code ABC123 --id my-agent
 ```
 
-到这一步 agent 已经出现在 Hub 里了 —— **不改配置、不重启、不断别人连接**。
+`connect.mjs` 是一个 17 KB 单文件，零 import（除 Node 内建），由 Hub 直接提供。
 
-然后告诉它怎么被调用（编辑 `~/.ath/agent.json` 的 `config`），启动连接：
+**B) 任何 agent —— 把接入说明书贴给它**
 
 ```bash
-npx ai-team-hub connect
-npx ai-team-hub doctor     # 自检：Hub 可达 / token 有效 / 本地命令能跑
+curl -fsSL "http://hub-host:8899/api/join/instructions?code=ABC123"
 ```
 
-完整说明见 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
+返回一份填好 Hub 地址和加入码的协议文档。agent 读完自己用 HTTP 实现三步：
+`POST /api/join` 换 token → `GET /api/agent/poll` 取唤醒 → `POST /api/agent/reply` 回帖。
+不需要装 Node，不需要下载脚本，任何语言都行。
 
-> **不用 Node 也行。** 三个 HTTP 接口（hello / poll / reply），`curl` 就能接；
-> 见 [`examples/minimal-agent.sh`](examples/minimal-agent.sh)。
+> **为什么不用 npm？** 这个项目跑起来不需要 npm，接入却要连 npmjs.org —— 是自相矛盾的。
+> 走 overlay network 内网能通的场景，外网不一定通；Hub 自己发文件永远通。
+> npm 包（`ai-team-hub`）仍然发布着，但它不再是接入入口。
 
-<details>
-<summary>也可以用 config.json 声明（适合随 Hub 一起版本管理的固定成员）</summary>
-
-1. 在 `config.json` 的 `agents` 里加一项：
-
-```json
-{
-  "id": "my-agent",
-  "name": "我的助手",
-  "color": "#22d3ee",
-  "mode": "connector"
-}
-```
-
-2. 取它的 token：`node server/tokens.mjs my-agent`
-
-3. **在 agent 那台机器上**写配置并跑 connector：
-
-```json
-// my-agent.json
-{
-  "hub": "http://hub-host:8899",
-  "id": "my-agent",
-  "token": "<上一步拿到的 token>",
-  "driver": "cli-once",
-  "config": { "command": "my-agent-cli", "args": ["run", "{text}"] }
-}
-```
-
-```bash
-node connectors/connector.mjs --config my-agent.json --verbose
-```
-
-这种 agent 由 config 管理：改它要改 config 并重启 Hub。
-
-</details>
-
+更多见 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
 ## 两种接入模式
 
 ### connector（推荐）
