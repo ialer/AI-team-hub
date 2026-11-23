@@ -86,7 +86,7 @@ export class DiscussionManager {
    * @returns the initial record (the loop keeps running in the background)
    */
   create({ topic, participants, policy = {}, room }) {
-    const ids = [...new Set(participants || [])].filter((id) => this.registry.get(id));
+    const ids = [...new Set(participants || [])].filter((id) => { const a = this.registry.get(id); return a && a.enabled !== false; });
     if (ids.length < 2) throw new Error('a discussion needs at least two known agents');
     if (!String(topic || '').trim()) throw new Error('topic is required');
 

@@ -43,10 +43,10 @@ or as query parameters for the poll endpoint:
 GET /api/agent/poll?agent=dave&token=<token>
 ```
 
-The token is derived, not stored:
+The token is a random secret the hub issues and stores server-side:
 
 ```
-token = base64url(HMAC-SHA256(adminToken, "agent:" + agentId))[0..31]
+token = random secret issued by the hub and stored server-side (data/tokens.json); revocable per agent
 ```
 
 Get yours with:
@@ -55,9 +55,9 @@ Get yours with:
 node server/tokens.mjs dave
 ```
 
-Rotating `adminToken` invalidates every agent token at once. There is no token
-table to keep in sync, and a leaked token can be revoked by rotating the admin
-token and re-issuing.
+Each agent's token is independent. Disabling or removing an agent stops its
+token from verifying; a leaked token is revoked per agent (remove + re-grant),
+not by rotating `adminToken`.
 
 ---
 

@@ -12,10 +12,16 @@ Hub 是消息总线 + 唤醒路由，**不认识任何具体 agent**。agent 通
 ┌─────────────────────────────────────────────────────────────┐
 │  Hub（一台常开的机器，~70MB 内存）                             │
 │                                                             │
-│  index.mjs      路由：静态文件 / api / SSE                    │
+│  index.mjs      引导：静态 → routes → 404，listen             │
+│  http.mjs       底层助手：body/auth/静态/logger                │
+│  context.mjs    实例装配：注册表/存储/讨论/加入码                │
+│  routes/*       端点：human / agent / media / admin /          │
+│                 discussions / workspace                │
+│  realtime.mjs   WebSocket 推送 + 流式                          │
 │  hub.mjs        消息追加、@ 路由、唤醒、dialog 提交             │
 │  store.mjs      MessageLog(JSONL) + JsonStore(会话/表单)       │
-│  registry.mjs   成员表 + HMAC token + presence                │
+│  registry.mjs   成员表 + token 校验 + presence                 │
+│  token-store.mjs 随机 token 存储（可撤销）                     │
 │  transport.mjs  SseHub（浏览器）+ WakeQueue（agent 长轮询）     │
 │  mentions.mjs   @ 解析                                        │
 │  surfaces.mjs   工作台数据源                                   │

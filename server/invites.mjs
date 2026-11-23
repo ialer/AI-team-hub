@@ -36,10 +36,11 @@ export class InviteStore {
   }
 
   /**
-   * Mint a code.
-   * @param {{ttlSec?: number, uses?: number, note?: string}} opts
+   * Mint a code, optionally bound to a pre-created agent identity.
+   * When `meta` is present the code only admits that id/name/role/avatar.
+   * @param {{ttlSec?: number, uses?: number, note?: string, meta?: object}} opts
    */
-  create({ ttlSec, uses, note } = {}) {
+  create({ ttlSec, uses, note, meta } = {}) {
     const code = randomCode(8);
     const invite = {
       code,
@@ -48,6 +49,7 @@ export class InviteStore {
       maxUses: Math.max(1, Number(uses || this.defaultUses)),
       uses: 0,
       note: note || '',
+      ...(meta ? { meta } : {}),
     };
     this.store.set(code, invite);
     return invite;

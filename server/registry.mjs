@@ -1,16 +1,20 @@
 /**
  * Agent registry: who exists, who is connected, and how they authenticate.
  *
- * Tokens are derived from the admin token plus the agent id (HMAC), so there is
- * no token table to keep in sync: rotate the admin token and every agent token
- * rotates with it. The hub only compares digests.
+ * Agent tokens are opaque random secrets stored server-side (TokenStore), so the
+ * hub can verify, revoke, and disable them per agent. The admin token stays a
+ * shared secret used only to gate admin endpoints. If no TokenStore is supplied
+ * (e.g. some unit tests), verification falls back to HMAC derivation.
  */
 import crypto from 'node:crypto';
 
 export class AgentRegistry {
-  constructor(agents, { adminToken = '' } = {}) {
-    this.agents = new Map(agents.map((a) => [a.id, { ...a }]));
+  constructor(agents, { adminToken = '', tokens = null } = {}) {
+    // Normalise at load so config-declared agents behave like joined ones:
+    // enabled defaults to true and avatar/presence fields always exist.
+    this.agents = new Map(agents.map((a) => [a.id, { ...a, enabled: a.enabled !== false, avatar: a.avatar || null }]));
     this.adminToken = adminToken;
+    this.tokens = tokens;
     this.presence = new Map(); // id -> { online, since, lastSeen, sessionId }
     this.connections = new Map(); // id -> count of live pollers
   }
@@ -33,6 +37,7 @@ export class AgentRegistry {
       name: agent.name || agent.id,
       role: agent.role || '',
       color: agent.color || '#7f8fa8',
+      avatar: agent.avatar || null,
       mode: agent.mode === 'push' ? 'push' : 'connector',
       adapter: agent.adapter || null,
       adapterConfig: agent.config || {},
@@ -81,6 +86,7 @@ export class AgentRegistry {
         name: a.name,
         role: a.role,
         color: a.color,
+        avatar: a.avatar || null,
         mode: a.mode,
         enabled: a.enabled,
         online,
@@ -98,7 +104,9 @@ export class AgentRegistry {
 
   /* ── tokens ───────────────────────────────────────────── */
 
+  /** The agent's token. With a TokenStore this mints one on first use. */
   tokenFor(agentId) {
+    if (this.tokens) return this.tokens.ensure(agentId);
     if (!this.adminToken) return '';
     return crypto
       .createHmac('sha256', this.adminToken)
@@ -109,12 +117,29 @@ export class AgentRegistry {
 
   /** Constant-time comparison against the expected token for this agent. */
   verify(agentId, token) {
+    if (this.tokens) return this.tokens.verify(agentId, token);
     const expected = this.tokenFor(agentId);
     if (!expected || !token) return false;
     const a = Buffer.from(String(token));
     const b = Buffer.from(expected);
     if (a.length !== b.length) return false;
     return crypto.timingSafeEqual(a, b);
+  }
+
+  /** Enable or disable an agent. Disabled agents cannot authenticate or be woken. */
+  setEnabled(agentId, enabled) {
+    const a = this.agents.get(agentId);
+    if (!a) return null;
+    a.enabled = Boolean(enabled);
+    return a;
+  }
+
+  /** Change an agent's avatar (emoji or image URL). */
+  setAvatar(agentId, avatar) {
+    const a = this.agents.get(agentId);
+    if (!a) return null;
+    a.avatar = avatar || null;
+    return a;
   }
 
   verifyAdmin(token) {

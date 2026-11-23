@@ -7,7 +7,7 @@
   "contextWindow": 10,
   "wakeTimeout": 180,
 
-  "_comment_adminToken": "Required. Every agent token is HMAC(adminToken, agent id). Rotate it to rotate all agent tokens.",
+  "_comment_adminToken": "Required. Gates admin endpoints only. Agent tokens are random secrets the hub issues and stores (data/tokens.json) - revocable per agent.",
   "adminToken": "CHANGE-ME-to-a-long-random-string",
 
   "human": {

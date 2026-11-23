@@ -342,6 +342,47 @@ async function cmdRemove(args) {
   } catch (e) { bad('移除失败：' + e.message); return 1; }
 }
 
+function adminTokenOf(args) {
+  return args.admin || process.env.ATH_ADMIN_TOKEN || readEnvToken(path.join(process.cwd(), '.env'), 'HUB_ADMIN_TOKEN') || readEnvToken(path.join(ROOT, '.env'), 'HUB_ADMIN_TOKEN');
+}
+
+async function cmdGrant(args) {
+  const hub = resolveHub(args.hub);
+  const admin = adminTokenOf(args);
+  if (!admin) { bad('需要管理员 token（--admin 或 ATH_ADMIN_TOKEN）'); return 2; }
+  const name = args.name;
+  const id = args.id;
+  if (!name || !id) { bad('用法：ath grant --name "名称" --id agent-id [--role 角色] [--dept 隶属] [--ttl 分钟] [--avatar emoji]'); return 2; }
+  try {
+    const r = await api(hub, '/api/admin/grant', {
+      method: 'POST', admin,
+      body: { name, id, role: args.role, dept: args.dept, avatar: args.avatar, ttlSec: args.ttl ? Number(args.ttl) * 60 : undefined },
+    });
+    ok(`接入协议已生成：${id}（码 ${r.invite.code}，${r.ttlMinutes} 分钟内有效，一次）`);
+    if (args.out) {
+      fs.writeFileSync(args.out, r.protocol, 'utf8');
+      ok(`协议已写入 ${args.out}`);
+    } else {
+      console.log('');
+      console.log(r.protocol);
+    }
+    return 0;
+  } catch (e) { bad('生成失败：' + e.message); return 1; }
+}
+
+async function cmdSetEnabled(args, enable) {
+  const id = args._[1] || args.id;
+  if (!id) { bad(`用法：ath ${enable ? 'enable' : 'disable'} <agent-id>`); return 2; }
+  const hub = resolveHub(args.hub);
+  const admin = adminTokenOf(args);
+  if (!admin) { bad('需要管理员 token（--admin 或 ATH_ADMIN_TOKEN）'); return 2; }
+  try {
+    await api(hub, '/api/admin/agents/' + encodeURIComponent(id) + (enable ? '/enable' : '/disable'), { method: 'POST', admin });
+    ok(`已${enable ? '启用' : '禁用'} ${id}`);
+    return 0;
+  } catch (e) { bad(`操作失败：${e.message}`); return 1; }
+}
+
 async function cmdDoctor(args) {
   const file = args.config || AGENT_FILE;
   let cfg = null;
@@ -426,6 +467,8 @@ ${c.bold('在 Hub 机器上')}
   ath up [--port 8899]              启动 Hub
   ath invite [--ttl 30] [--uses 1]  生成加入码
   ath tokens [<id>]                 查看 agent token
+  ath grant --name N --id I         生成一次性接入协议
+  ath disable|enable <id>           禁用/启用成员
   ath rm <id>                       移除用加入码加入的 agent
 
 ${c.bold('在新 agent 机器上')}
@@ -436,7 +479,7 @@ ${c.bold('在新 agent 机器上')}
 
 ${c.bold('环境变量')}
   ATH_HUB             默认 Hub 地址
-  ATH_ADMIN_TOKEN     管理员 token（ath invite 用）
+  ATH_ADMIN_TOKEN     管理员 token（invite / grant / disable / enable 用）
   ATH_JOIN_CODE       加入码（可代替 --code）
 `);
 }
@@ -457,6 +500,9 @@ async function main() {
     case 'connect': return cmdConnect(args);
     case 'up': return cmdUp(args);
     case 'tokens': return cmdTokens(args);
+    case 'grant': return cmdGrant(args);
+    case 'disable': return cmdSetEnabled(args, false);
+    case 'enable': return cmdSetEnabled(args, true);
     case 'rm': case 'remove': return cmdRemove(args);
     case 'doctor': return cmdDoctor(args);
 case 'version': case '-v': {

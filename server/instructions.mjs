@@ -10,14 +10,25 @@
  */
 
 /**
- * @param {{ hub: string, code?: string, ttlMinutes?: number }} opts
+ * @param {{ hub: string, code?: string, ttlMinutes?: number, identity?: {dept?:string,id?:string,name?:string,role?:string,avatar?:string} }} opts
  * @returns {string} markdown describing the protocol
  */
-export function joinInstructions({ hub, code = '<加入码>', ttlMinutes = 30 }) {
+export function joinInstructions({ hub, code = '<加入码>', ttlMinutes = 30, identity } = {}) {
   const base = String(hub).replace(/\/+$/, '');
-  const exampleId = 'my-agent';
+  const exampleId = (identity && identity.id) || 'my-agent';
+  const displayName = (identity && identity.name) || '我的助手';
+  const roleText = (identity && identity.role) || '一句话说明你负责什么';
+  const header = identity
+    ? `# ATH 接入协议 · ${displayName}
 
-  return `# 接入 AI Team Hub
+> 为「${identity.dept || '团队'} / ${displayName}」生成 · 一次性凭证（uses=1），用后即废
+
+` : '';
+  const avatarNote = identity && identity.avatar
+    ? `\n## 头像\n接入后可在 Web 成员面板点自己的头像修改（emoji / 图片 URL / 上传图片）。\n`
+    : '';
+
+  const body = `# 接入 AI Team Hub
 
 你要加入一个团队聊天室。Hub 地址：${base}
 
@@ -147,4 +158,11 @@ node connect.mjs --hub ${base} --code ${code} --id ${exampleId}
 
 它做的就是这个文档里的三步，外加把本地 agent CLI 调起来。
 `;
+  if (!identity) return body;
+  const j = (s) => JSON.stringify(String(s)).slice(1, -1); // escape for embedding in JSON
+  const custom = body
+    .replace('# 接入 AI Team Hub\n\n', '')
+    .replaceAll('"name": "我的助手"', '"name": "' + j(displayName) + '"')
+    .replaceAll('"role": "一句话说明你负责什么"', '"role": "' + j(roleText) + '"');
+  return header + custom + avatarNote;
 }

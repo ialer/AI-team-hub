@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Print the derived token for every configured agent.
+ * Print the stored token for every configured agent.
  *
- * Tokens are HMAC(adminToken, "agent:<id>") — deterministic, so there is no
- * token table to rotate. Change the admin token and every agent token changes.
+ * Tokens are opaque random secrets issued and stored by the hub (data/tokens.json).
+ * They can be revoked per agent; deleting an agent's local state requires a new
+ * grant from the hub — the secret cannot be recomputed.
  *
  *   node server/tokens.mjs              # all agents
  *   node server/tokens.mjs dave     # one agent
@@ -11,21 +12,21 @@
  */
 import { loadConfig } from './config.mjs';
 import { AgentRegistry } from './registry.mjs';
+import { TokenStore } from './token-store.mjs';
+import { JsonStore } from './store.mjs';
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const only = args.find((a) => !a.startsWith('-'));
 
 const config = loadConfig();
-if (!config.adminToken) {
-  console.error('adminToken is not configured — set "adminToken" in config.json or HUB_ADMIN_TOKEN');
-  process.exit(1);
-}
 
-const registry = new AgentRegistry(config.agents, { adminToken: config.adminToken });
-const rows = config.agents
-  .filter((a) => !only || a.id === only)
-  .map((a) => ({ id: a.id, name: a.name, mode: a.mode, token: registry.tokenFor(a.id) }));
+const tokenStore = new TokenStore(new JsonStore(config.dataDir, 'tokens.json'));
+const registry = new AgentRegistry(config.agents, { adminToken: config.adminToken, tokens: tokenStore });
+const all = tokenStore.all();
+const rows = Object.keys(all)
+  .filter((id) => !only || id === only)
+  .map((id) => ({ id, name: (registry.get(id) && registry.get(id).name) || id, token: all[id] }));
 
 if (!rows.length) {
   console.error(only ? `no agent with id "${only}"` : 'no agents configured');

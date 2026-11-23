@@ -12,9 +12,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /** Write a file atomically (tmp + rename) so a crash never leaves half a file. */
-export function writeJsonAtomic(file, value) {
+export function writeJsonAtomic(file, value, opts = {}) {
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
+  const mode = opts.mode || 0o644;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode });
+  // writeFileSync's mode is masked by umask and ignored on Windows; chmod makes
+  // the intent explicit where the platform honours it (Linux/NAS).
+  try { fs.chmodSync(tmp, mode); } catch { /* non-posix: ignore */ }
   fs.renameSync(tmp, file);
 }
 
@@ -96,9 +100,10 @@ export class MessageLog {
 
 /** Small JSON document store for session ids and dialogs. */
 export class JsonStore {
-  constructor(dataDir, name, fallback = {}) {
+  constructor(dataDir, name, fallback = {}, opts = {}) {
     ensureDir(dataDir);
     this.file = path.join(dataDir, name);
+    this.mode = opts.mode || 0;
     this.data = readJsonFile(this.file, fallback);
   }
 
@@ -123,6 +128,6 @@ export class JsonStore {
   }
 
   save() {
-    writeJsonAtomic(this.file, this.data);
+    writeJsonAtomic(this.file, this.data, { mode: this.mode });
   }
 }
