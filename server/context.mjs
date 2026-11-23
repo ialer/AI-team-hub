@@ -14,6 +14,7 @@ import { InviteStore } from './invites.mjs';
 import { TokenStore } from './token-store.mjs';
 import { createLogger } from './http.mjs';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import './adapters/builtin.mjs'; // registers the built-in adapters
 
@@ -36,9 +37,15 @@ export function createContext() {
     if (sid) registry.markSeen(agent.id, { online: false, sessionId: sid });
   }
 
-  // Config-declared agents also get a stored token so verification is uniform.
-  for (const agent of config.agents) tokenStore.ensure(agent.id);
-
+  // Migration: agents that existed before tokens were stored get their legacy
+  // HMAC value as their initial stored token, so live connectors keep working.
+  // From then on the token is revocable (delete the entry) like any other.
+  const legacyToken = (id) => crypto.createHmac('sha256', config.adminToken || '')
+    .update(`agent:${id}`).digest('base64url').slice(0, 32);
+  for (const agent of config.agents) {
+    if (config.adminToken && !tokenStore.peek(agent.id)) tokenStore.seed(agent.id, legacyToken(agent.id));
+    tokenStore.ensure(agent.id);
+  }
   const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
   const surfaces = createSurfaces({ dataDir: config.dataDir, log });
   const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
@@ -59,6 +66,11 @@ export function createContext() {
     }
   }
   if (joinedAgents.length) log.line(`restored ${joinedAgents.length} joined agent(s) from data/agents.json`);
+  // Seed tokens for restored joined agents now that they exist in the registry.
+  for (const agent of registry.joined()) {
+    if (config.adminToken && !tokenStore.peek(agent.id)) tokenStore.seed(agent.id, legacyToken(agent.id));
+    tokenStore.ensure(agent.id);
+  }
   invites.prune();
 
   function persistJoined() {

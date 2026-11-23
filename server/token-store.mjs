@@ -26,6 +26,14 @@ export class TokenStore {
     return token;
   }
 
+  /** Seed a token only if the agent has none yet (migration from HMAC). */
+  seed(agentId, token) {
+    if (!token) return this.peek(agentId);
+    if (this.peek(agentId)) return this.peek(agentId);
+    this.store.set(agentId, token);
+    return token;
+  }
+
   /** The agent's token if it has one, else ''. */
   peek(agentId) {
     return this.store.get(agentId, '') || '';
