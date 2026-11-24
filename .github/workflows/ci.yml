@@ -82,11 +82,12 @@ jobs:
           # 1. state endpoint answers
           curl -sf http://127.0.0.1:8899/api/state > /dev/null
 
-          # 2. tokens are deterministic
-          T1=$(node server/tokens.mjs lp)
-          T2=$(node server/tokens.mjs lp)
-          [ "$T1" = "$T2" ] || { echo "token not deterministic"; exit 1; }
+          # 2. tokens are server-issued and stored: same value on every read,
+          #    and present for a config-declared agent (seeded at boot).
+          T1=$(node server/tokens.mjs lp | awk '{print $2}')
+          T2=$(node server/tokens.mjs lp | awk '{print $2}')
           [ -n "$T1" ] || { echo "token empty"; exit 1; }
+          [ "$T1" = "$T2" ] || { echo "token changed between reads"; exit 1; }
 
           # 3. push adapter round trip
           curl -sf -X POST http://127.0.0.1:8899/api/say \
@@ -181,8 +182,24 @@ jobs:
           HUB_PID=$!
           trap "kill $HUB_PID" EXIT
           sleep 2
-          for p in / /style.css /app.js; do
+          for p in / /style.css /app.js /admin.js /admin.css /store.mjs /connect.mjs; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8899$p")
             [ "$code" = "200" ] || { echo "$p returned $code"; exit 1; }
           done
           echo "static assets ok"
+
+      - name: Health endpoint reports readiness
+        run: |
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+          BODY=$(curl -sf http://127.0.0.1:8899/api/health)
+          echo "$BODY"
+          echo "$BODY" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const h=JSON.parse(s);
+              if (h.ok !== true) { console.error('health not ok'); process.exit(1); }
+              if (!h.version) { console.error('health missing version'); process.exit(1); }
+            });"
+          echo "health ok"
