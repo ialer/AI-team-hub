@@ -37,6 +37,19 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && !p.startsWith('/api/')) return serveStatic(config.publicDir, req, res, p);
 
+    // Liveness/readiness probe for external monitors: cheap, no auth, no writes.
+    if (p === '/api/health' && req.method === 'GET') {
+      const agents = ctx.registry.publicView();
+      const online = Object.values(agents).filter((a) => a.online).length;
+      return sendJson(res, 200, {
+        ok: true,
+        version: config.version || '0.4.0',
+        agents: Object.keys(agents).length,
+        online,
+        uptimeSec: Math.round(process.uptime()),
+      });
+    }
+
     for (const route of routes) {
       if (await route(req, res, url, p)) return;
     }

@@ -13,7 +13,7 @@ cd AI-team-hub
 cp .env.example .env
 # 生成一个 admin token
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" > /tmp/tok
-echo "HUB_ADMIN_TOKEN=dev-token-please-change> .env
+echo "HUB_ADMIN_TOKEN=<random-admin-token>> .env
 
 cp config.example.json config.json
 # 编辑 config.json：填 agents 列表
@@ -85,7 +85,7 @@ systemctl --user enable --now ai-team-hub
 ## 三、直接前台跑（调试用）
 
 ```bash
-HUB_ADMIN_TOKEN=dev-token-please-change node server/index.mjs
+HUB_ADMIN_TOKEN=<random-admin-token> node server/index.mjs
 ```
 
 ---
