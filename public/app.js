@@ -632,12 +632,27 @@ function appendMessage(m) {
   scrollIfNearBottom();
 }
 
+async function backfillMessages() {
+  // EventSource reconnects on its own but events sent while offline are gone.
+  // Replay the durable message log from the last id we rendered (dedup is in
+  // appendMessage), so a brief network blip never leaves a hole in the room.
+  try {
+    const r = await fetch(`/api/messages?room=${encodeURIComponent(state.room)}&after=${state.lastId}`);
+    if (!r.ok) return;
+    const j = await r.json();
+    for (const m of (j.messages || [])) appendMessage(m);
+  } catch { /* next reconnect will try again */ }
+}
+
 function connectStream() {
   const es = new EventSource('/api/stream');
+  let openedOnce = false;
 
-  es.addEventListener('open', () => {
+  es.addEventListener('open', async () => {
     el.conn.classList.remove('off');
     el.sub.textContent = '已连接 · ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    if (openedOnce) await backfillMessages();
+    openedOnce = true;
   });
   es.addEventListener('error', () => {
     el.conn.classList.add('off');
@@ -1118,7 +1133,7 @@ const SURFACES = [
 
 async function renderPanel() {
   el.panelTabs.innerHTML = SURFACES.map((s) =>
-    `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}">${s.label}</button>`
+    `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}" tabindex="${s.id === state.surface ? '0' : '-1'}">${s.label}</button>`
   ).join('') + '<button class="panel-tab panel-back" id="panelBack" type="button" aria-label="返回对话">‹ 返回</button>';
 
   // Snapshot the requested surface: a fast tab switch bumps state.surface, and
@@ -1155,6 +1170,24 @@ async function renderPanel() {
     el.panelBody.innerHTML = `<div class="empty" style="padding:24px">// 该 surface 暂不可用</div>`;
   }
 }
+
+el.panelTabs.addEventListener('keydown', (e) => {
+  const tabs = [...el.panelTabs.querySelectorAll('.panel-tab[data-surface]')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  let n = -1;
+  if (e.key === 'ArrowRight') n = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft') n = (i - 1 + tabs.length) % tabs.length;
+  else if (e.key === 'Home') n = 0;
+  else if (e.key === 'End') n = tabs.length - 1;
+  if (n < 0) return;
+  e.preventDefault();
+  const surface = tabs[n].dataset.surface;
+  tabs[n].click();
+  // renderPanel() rebuilds the tab DOM; restore focus to the new active tab
+  // so keyboard users stay on the tablist (roving tabindex).
+  el.panelTabs.querySelector(`.panel-tab[data-surface="${surface}"]`)?.focus();
+});
 
 el.panelTabs.addEventListener('click', (e) => {
   const btn = e.target.closest('.panel-tab');
