@@ -221,7 +221,10 @@ function scrollIfNearBottom() {
 
 function messageEl(m) {
   const who = whoOf(m.from);
-  const initial = (who.name || '?').slice(0, 1).toUpperCase();
+  const nm = String(who.name || '?').trim();
+  // Same rule as the member panel: for 宁-prefixed names use the next character
+  // so 薇/汐/瑶/莺 are distinguishable at a glance.
+  const initial = (nm.length > 1 && nm.charAt(0) === '宁' ? nm.charAt(1) : nm.charAt(0)).toUpperCase();
   // Agents may set a custom avatar (emoji or image URL); fall back to the
   // name's first character. This is what makes participants distinguishable.
   const av = String(who.avatar || '').trim();
