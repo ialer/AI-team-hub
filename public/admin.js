@@ -16,10 +16,13 @@ function api(path,opts){
     return r.json().catch(function(){return {};}).then(function(b){ if(!r.ok) throw new Error(b.error||('HTTP '+r.status)); return b; });
   });
 }
-function avHtml(av){
+function avHtml(av,name){
   const v=String(av||'');
   if(/^https?:\/\//.test(v)||/^data:/.test(v)) return '<img src="'+esc(v)+'" alt="">';
-  return esc(v||'?');
+  // No custom avatar: fall back to the first character of the name so members
+  // stay distinguishable instead of every row showing the same "?".
+  const ch=v || (String(name||'').trim().charAt(0)) || '?';
+  return esc(ch);
 }
 function rowHtml(m){
   const online=m.enabled?(m.online?'在线':'离线'):'已禁用';
@@ -27,7 +30,7 @@ function rowHtml(m){
   // Removal is a tombstone in overrides.json, so it is allowed for every
   // member; config-declared ones can be restored from the panel.
   return '<div class="mem-row'+cls+'">'
-    +'<button class="mem-av" data-av="'+esc(m.id)+'" title="改头像">'+avHtml(m.avatar)+'</button>'
+    +'<button class="mem-av" data-av="'+esc(m.id)+'" title="改头像">'+avHtml(m.avatar,m.name)+'</button>'
     +'<div><div class="mem-name">'+esc(m.name)+'<span class="mem-id">'+esc(m.id)+'</span></div>'
     +'<div class="mem-role">'+esc(m.role||'')+'</div>'
     +'<div class="mem-badges"><span class="mem-badge'+(m.enabled&&m.online?' on':'')+'">'+online+'</span><span class="mem-badge">'+esc(m.source||'')+'</span></div></div>'
