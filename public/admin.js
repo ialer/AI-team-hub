@@ -21,7 +21,10 @@ function avHtml(av,name){
   if(/^https?:\/\//.test(v)||/^data:/.test(v)) return '<img src="'+esc(v)+'" alt="">';
   // No custom avatar: fall back to the first character of the name so members
   // stay distinguishable instead of every row showing the same "?".
-  const ch=v || (String(name||'').trim().charAt(0)) || '?';
+  const nm=String(name||'').trim();
+  // Team names all start with 宁 — use the character after it so members stay
+  // distinguishable at a glance (薇/汐/瑶/莺 instead of four identical 宁).
+  const ch=v || (nm.length > 1 && nm.charAt(0) === '宁' ? nm.charAt(1) : nm.charAt(0)) || '?';
   return esc(ch);
 }
 function rowHtml(m){
