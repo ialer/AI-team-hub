@@ -77,7 +77,7 @@ async function renderReadOnly(host){
   if(!agents.length){ host.innerHTML='<div class="mem-hint">暂无成员</div>'; return; }
   const on=agents.filter(function(a){return a.enabled;});
   const off=agents.filter(function(a){return !a.enabled;});
-  const row=function(m){ return '<div class="mem-row disabled">'+avHtml(m.avatar)+'<div><div class="mem-name">'+esc(m.name)+'<span class="mem-id">'+esc(m.id)+'</span></div><div class="mem-role">'+esc(m.role||'')+'</div><div class="mem-badges"><span class="mem-badge'+(m.online?' on':'')+'">'+(m.online?'在线':'离线')+'</span></div></div></div>'; };
+  const row=function(m){ return '<div class="mem-row disabled">'+avHtml(m.avatar,m.name)+'<div><div class="mem-name">'+esc(m.name)+'<span class="mem-id">'+esc(m.id)+'</span></div><div class="mem-role">'+esc(m.role||'')+'</div><div class="mem-badges"><span class="mem-badge'+(m.online?' on':'')+'">'+(m.online?'在线':'离线')+'</span></div></div></div>'; };
   let h='';
   if(on.length) h+='<div class="mem-group"><span>启用 · '+on.length+' 人</span><span>'+on.filter(function(a){return a.online;}).length+' 在线</span></div>'+on.map(row).join('');
   if(off.length) h+='<div class="mem-group"><span>已禁用 · '+off.length+'</span></div>'+off.map(row).join('');
