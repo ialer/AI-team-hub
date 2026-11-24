@@ -80,13 +80,18 @@ body::before {
   box-shadow: 0 0 80px -30px rgba(34, 211, 238, 0.16);
 }
 
-/* With the workspace panel open, the chat shrinks to the left column. */
+/* With the workspace panel open, the chat shrinks to the left column and the
+   panel becomes the full-height right column. Every child is placed explicitly:
+   auto-placement otherwise drops the panel into the last row instead. */
 .app.with-panel {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
 }
 
-.app.with-panel > header { grid-column: 1 / -1; }
-.app.with-panel > footer { grid-column: 1; }
+.app.with-panel > header { grid-column: 1 / -1; grid-row: 1; }
+.app.with-panel > .discuss-bar { grid-column: 1; grid-row: 2; }
+.app.with-panel > main { grid-column: 1; grid-row: 3; }
+.app.with-panel > footer { grid-column: 1; grid-row: 4; }
+.app.with-panel > .panel { grid-column: 2; grid-row: 2 / 5; }
 
 /* ── header ─────────────────────────────────────────── */
 header {
