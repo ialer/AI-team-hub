@@ -924,7 +924,9 @@ textarea::placeholder { color: var(--text-faint); }
   .icon-btn, .attach { width: var(--target); height: var(--target); }
   .emoji-cell { min-block-size: var(--target); }
   .panel-tab { min-block-size: var(--target); }
-  .panel-back { display: inline-flex; align-items: center; margin-left: auto; order: 99; color: var(--cyan); }
+@media (max-width: 820px) {
+    .panel-back { display: inline-flex; align-items: center; margin-left: auto; order: 99; color: var(--cyan); }
+  }
 }
 
 @media (max-width: 860px) {
