@@ -12,7 +12,12 @@ export class AgentRegistry {
   constructor(agents, { adminToken = '', tokens = null } = {}) {
     // Normalise at load so config-declared agents behave like joined ones:
     // enabled defaults to true and avatar/presence fields always exist.
-    this.agents = new Map(agents.map((a) => [a.id, { ...a, enabled: a.enabled !== false, avatar: a.avatar || null }]));
+    this.agents = new Map(agents.map((a) => [a.id, {
+      ...a,
+      enabled: a.enabled !== false,
+      avatar: a.avatar || null,
+      source: a.source || 'config',
+    }]));
     this.adminToken = adminToken;
     this.tokens = tokens;
     this.presence = new Map(); // id -> { online, since, lastSeen, sessionId }
