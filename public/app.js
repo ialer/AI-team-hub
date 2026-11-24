@@ -1119,7 +1119,7 @@ const SURFACES = [
 async function renderPanel() {
   el.panelTabs.innerHTML = SURFACES.map((s) =>
     `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}">${s.label}</button>`
-  ).join('');
+  ).join('') + '<button class="panel-tab panel-back" id="panelBack" type="button" aria-label="返回对话">‹ 返回</button>';
 
   // Snapshot the requested surface: a fast tab switch bumps state.surface, and
   // any in-flight render must not overwrite the panel the user is now looking at.
@@ -1159,6 +1159,7 @@ async function renderPanel() {
 el.panelTabs.addEventListener('click', (e) => {
   const btn = e.target.closest('.panel-tab');
   if (!btn) return;
+  if (btn.id === 'panelBack') { togglePanel(false); return; } // mobile: back to chat
   state.surface = btn.dataset.surface;
   renderPanel();
 });

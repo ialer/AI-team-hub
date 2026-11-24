@@ -89,6 +89,7 @@ export class AgentRegistry {
         avatar: a.avatar || null,
         mode: a.mode,
         enabled: a.enabled,
+        source: a.source,
         online,
         lastSeen: p.lastSeen || null,
       };

@@ -712,6 +712,9 @@ textarea::placeholder { color: var(--text-faint); }
 }
 .panel-tab[aria-selected="true"] { color: var(--cyan); border-bottom-color: var(--cyan); }
 
+/* Mobile-only "back to chat": the panel is a full-screen overlay there. */
+.panel-back { display: none; }
+
 .panel-body { flex: 1; overflow-y: auto; padding: 10px; display: grid; gap: 6px; align-content: start; }
 
 .surface-item {
@@ -921,6 +924,7 @@ textarea::placeholder { color: var(--text-faint); }
   .icon-btn, .attach { width: var(--target); height: var(--target); }
   .emoji-cell { min-block-size: var(--target); }
   .panel-tab { min-block-size: var(--target); }
+  .panel-back { display: inline-flex; align-items: center; margin-left: auto; order: 99; color: var(--cyan); }
 }
 
 @media (max-width: 860px) {
