@@ -24,14 +24,15 @@ function avHtml(av){
 function rowHtml(m){
   const online=m.enabled?(m.online?'在线':'离线'):'已禁用';
   const cls=m.enabled?'':' disabled';
-  const cfg=m.source==='config';
+  // Removal is a tombstone in overrides.json, so it is allowed for every
+  // member; config-declared ones can be restored from the panel.
   return '<div class="mem-row'+cls+'">'
     +'<button class="mem-av" data-av="'+esc(m.id)+'" title="改头像">'+avHtml(m.avatar)+'</button>'
     +'<div><div class="mem-name">'+esc(m.name)+'<span class="mem-id">'+esc(m.id)+'</span></div>'
     +'<div class="mem-role">'+esc(m.role||'')+'</div>'
     +'<div class="mem-badges"><span class="mem-badge'+(m.enabled&&m.online?' on':'')+'">'+online+'</span><span class="mem-badge">'+esc(m.source||'')+'</span></div></div>'
     +'<div class="mem-ops"><button class="mem-switch" role="switch" aria-checked="'+(m.enabled?'true':'false')+'" data-toggle="'+esc(m.id)+'" aria-label="启用/禁用 '+esc(m.name)+'"></button>'
-    +'<button class="mem-rm" data-rm="'+esc(m.id)+'"'+(cfg?' disabled title="config 声明成员需改配置后重启"':'')+'>移除</button></div>'
+    +'<button class="mem-rm" data-rm="'+esc(m.id)+'">移除</button></div>'
     +'</div>';
 }
 export async function mountMembersPanel(body, foot){
@@ -70,9 +71,15 @@ async function renderList(body,foot){
   const agents=Object.values(state.agents||{});
   const on=agents.filter(function(a){return a.enabled;});
   const off=agents.filter(function(a){return !a.enabled;});
+  let gone=[];
+  try{ gone=(await api('/api/admin/deleted')).deleted||[]; }catch(e){ gone=[]; }
   let h='<div class="mem-wrap">';
   if(on.length) h+='<div class="mem-group"><span>启用 · '+on.length+' 人</span><span>'+on.filter(function(a){return a.online;}).length+' 在线</span></div>'+on.map(rowHtml).join('');
   if(off.length) h+='<div class="mem-group"><span>已禁用 · '+off.length+'</span></div>'+off.map(rowHtml).join('');
+  if(gone.length){
+    h+='<div class="mem-group"><span>已移除 · '+gone.length+'</span></span></div>';
+    h+=gone.map(function(id){ return '<div class="mem-row disabled"><div class="mem-av">✕</div><div><div class="mem-name">'+esc(id)+'</div><div class="mem-role">已从配置成员中移除</div></div><div class="mem-ops"><button class="mem-rm" data-restore="'+esc(id)+'">恢复</button></div></div>'; }).join('');
+  }
   h+='</div>';
   body.innerHTML=h;
   foot.innerHTML='<button class="mem-grant" id="athGrant">＋ 生成接入协议</button>';
@@ -88,6 +95,12 @@ async function renderList(body,foot){
   });
   body.querySelectorAll('[data-av]').forEach(function(el){
     el.onclick=function(){ openAvatar(el.dataset.av,body,foot); };
+  });
+  body.querySelectorAll('[data-restore]').forEach(function(el){
+    el.onclick=async function(){
+      try{ await api('/api/admin/agents/'+encodeURIComponent(el.dataset.restore)+'/restore',{method:'POST'}); await renderList(body,foot); }
+      catch(e){ con('恢复失败：'+e.message); }
+    };
   });
   const g=foot.querySelector('#athGrant');
   if(g) g.onclick=function(){ openGrant(body,foot); };

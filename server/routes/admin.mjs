@@ -59,16 +59,32 @@ export function createAdminRoutes(ctx) {
       const token = req.headers['x-admin-token'] || bearer(req) || url.searchParams.get('admin');
       if (!registry.verifyAdmin(token)) { sendJson(res, 401, { error: 'admin token required' }); return true; }
       const id = decodeURIComponent(p.split('/').pop());
-      const agent = registry.get(id);
-      if (!agent) { sendJson(res, 404, { error: 'not found' }); return true; }
-      if (agent.source !== 'join') { sendJson(res, 409, { error: `"${id}" is declared in config.json — remove it there and restart` }); return true; }
-      registry.removeAgent(id);
-      tokenStore.revoke(id);
-      persistJoined();
-      persistOverrides(); // drop its override entry too
+      const removed = ctx.removeAgent(id);
+      if (!removed) { sendJson(res, 404, { error: 'not found' }); return true; }
       hub.refreshAgents();
-      log.line(`agent ${id} removed by admin`);
-      sendJson(res, 200, { ok: true, removed: id });
+      log.line(`agent ${id} removed by admin (${removed.source})`);
+      sendJson(res, 200, { ok: true, removed: id, source: removed.source, restorable: removed.source === 'config' });
+      return true;
+    }
+
+    /* ── admin: soft-deleted (tombstoned) config agents ── */
+    if (p === '/api/admin/deleted' && req.method === 'GET') {
+      const token = req.headers['x-admin-token'] || bearer(req) || url.searchParams.get('admin');
+      if (!registry.verifyAdmin(token)) { sendJson(res, 401, { error: 'admin token required' }); return true; }
+      sendJson(res, 200, { deleted: ctx.deletedIds() });
+      return true;
+    }
+
+    /* ── admin: restore a tombstoned config agent ── */
+    if (p.startsWith('/api/admin/agents/') && p.endsWith('/restore') && req.method === 'POST') {
+      const token = req.headers['x-admin-token'] || bearer(req) || url.searchParams.get('admin');
+      if (!registry.verifyAdmin(token)) { sendJson(res, 401, { error: 'admin token required' }); return true; }
+      const id = decodeURIComponent(p.split('/').filter(Boolean)[3]);
+      const agent = ctx.restoreAgent(id);
+      if (!agent) { sendJson(res, 404, { error: 'only config-declared agents can be restored' }); return true; }
+      hub.refreshAgents();
+      log.line(`agent ${id} restored by admin`);
+      sendJson(res, 200, { ok: true, agent: { id, enabled: agent.enabled } });
       return true;
     }
 

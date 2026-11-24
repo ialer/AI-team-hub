@@ -84,26 +84,50 @@ export function createContext() {
   }
 
   /* ── operator overrides ──
-     enabled/avatar chosen at runtime must survive a restart even for agents
-     declared in config.json (those are otherwise reset from config on boot). */
+     config.json is only a seed. Runtime state (enabled / avatar / deleted) is
+     stored in overrides.json, so the operator can disable or remove even a
+     config-declared agent from the UI without editing the config or restarting.
+     Removal is a tombstone, not a config edit: it is reversible at runtime. */
   const overridesStore = new JsonStore(config.dataDir, 'overrides.json');
   const overrides = overridesStore.all();
+  const tombstoned = new Set();
   for (const [id, ov] of Object.entries(overrides)) {
     if (!registry.get(id)) continue;
+    if (ov.deleted === true) { tombstoned.add(id); registry.removeAgent(id); continue; }
     if (Object.prototype.hasOwnProperty.call(ov, 'enabled')) registry.setEnabled(id, ov.enabled);
     if (Object.prototype.hasOwnProperty.call(ov, 'avatar')) registry.setAvatar(id, ov.avatar);
   }
   function persistOverrides() {
-    // Only config-declared agents need an override: joined agents persist their
-    // own enabled/avatar in agents.json via persistJoined, so writing them here
-    // too would create two sources of truth.
+    // Joined agents keep their own record in agents.json; only config-declared
+    // ones plus tombstones live here, so there is one source of truth each.
     const map = {};
     for (const a of registry.list()) {
       if (a.source === 'join') continue;
       map[a.id] = { enabled: a.enabled !== false, avatar: a.avatar || null };
     }
+    for (const id of tombstoned) map[id] = { deleted: true };
     overridesStore.data = map;
     overridesStore.save();
+  }
+  /** Remove any agent. config-declared ones get a tombstone so it sticks. */
+  function removeAgent(id) {
+    const a = registry.get(id);
+    if (!a) return null;
+    if (a.source === 'config') tombstoned.add(id);
+    registry.removeAgent(id);
+    tokenStore.revoke(id);
+    if (a.source === 'join') persistJoined();
+    persistOverrides();
+    return a;
+  }
+  /** Undo a removal of a config-declared agent (joined ones need a new grant). */
+  function restoreAgent(id) {
+    const seed = config.agents.find((x) => x.id === id);
+    if (!seed) return null;
+    tombstoned.delete(id);
+    const a = registry.addAgent({ ...seed, source: 'config' });
+    persistOverrides();
+    return a;
   }
 
   const discussions = new DiscussionManager({
@@ -115,5 +139,6 @@ export function createContext() {
   return {
     config, log, messages, sessions, dialogs, registry, sse, wakeQueue,
     hub, surfaces, storage, invites, discussions, persistJoined, persistOverrides, tokenStore,
+    removeAgent, restoreAgent, deletedIds: () => [...tombstoned],
   };
 }
