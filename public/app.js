@@ -222,6 +222,13 @@ function scrollIfNearBottom() {
 function messageEl(m) {
   const who = whoOf(m.from);
   const initial = (who.name || '?').slice(0, 1).toUpperCase();
+  // Agents may set a custom avatar (emoji or image URL); fall back to the
+  // name's first character. This is what makes participants distinguishable.
+  const av = String(who.avatar || '').trim();
+  const isImg = /^https?:\/\//.test(av) || /^data:/.test(av);
+  const avHtml = isImg
+    ? `<div class="av-lg" style="--c:${who.color}" aria-hidden="true"><img src="${escapeHtml(av)}" alt=""></div>`
+    : `<div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(av || initial)}</div>`;
 
   // Right-alignment means "a human typed this here". The hub tags every message
   // with its origin (user vs agent), so switching the speaking identity to an
@@ -239,7 +246,7 @@ function messageEl(m) {
   if (m.kind && m.kind !== 'chat') article.dataset.kind = m.kind;
 
   article.innerHTML = `
-    <div class="av-lg" style="--c:${who.color}" aria-hidden="true">${escapeHtml(initial)}</div>
+    ${avHtml}
     <div class="body">
       <div class="meta">
         <span class="who" style="--c:${who.color}">${escapeHtml(who.name)}</span>
