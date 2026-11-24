@@ -14,6 +14,10 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// A global WebSocket client only exists in Node >=22. On older runtimes this
+// end-to-end guard is skipped rather than failing the whole suite.
+const hasWebSocket = typeof WebSocket === 'function';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const ADMIN = 'test-admin-token';
@@ -26,7 +30,7 @@ function freePort() {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test('a disabled agent is cut off mid-connection and cannot write', async () => {
+test('a disabled agent is cut off mid-connection and cannot write', { skip: !hasWebSocket && 'global WebSocket requires Node >=22' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ath-ws-'));
   const port = await freePort();
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
