@@ -12,8 +12,9 @@
    ══════════════════════════════════════════════════════ */
 
 import { mountMembersPanel } from './admin.js';
+import { createStore } from './store.mjs';
 
-const state = {
+const store = createStore({
   me: localStorage.getItem('hub.identity') || 'human',
   room: 'team',
   agents: {},
@@ -25,7 +26,8 @@ const state = {
   dialogs: {},
   panelOpen: localStorage.getItem('hub.panel') === '1',
   surface: 'docs',
-};
+});
+const state = store.data; // reads stay plain; writes go through store.set()
 
 const $ = (sel) => document.querySelector(sel);
 const el = {
@@ -590,18 +592,18 @@ async function loadDialogs() {
   try {
     const r = await fetch('/api/dialogs');
     const j = await r.json();
-    state.dialogs = j.dialogs || {};
+    store.set({ dialogs: j.dialogs || {} });
   } catch { /* panel still works */ }
 }
 
 async function loadState() {
   const r = await fetch('/api/state');
   const j = await r.json();
-  state.agents = j.agents || {};
-  state.human = j.human || state.human;
-  state.room = j.defaultRoom || 'team';
-  state.busy = new Set(j.busy || []);
-  state.lastId = j.lastId || 0;
+  store.set({ agents: j.agents || {} });
+  store.set({ human: j.human || state.human });
+  store.set({ room: j.defaultRoom || 'team' });
+  store.set({ busy: new Set(j.busy || []) });
+  store.set({ lastId: j.lastId || 0 });
   await loadDialogs();
   renderMembers();
 }
@@ -618,7 +620,7 @@ async function loadHistory() {
   } else {
     for (const m of j.messages) {
       el.list.appendChild(messageEl(m));
-      if (m.id > state.lastId) state.lastId = m.id;
+      if (m.id > state.lastId) store.set({ lastId: m.id });
     }
   }
   requestAnimationFrame(() => { el.scroller.scrollTop = el.scroller.scrollHeight; });
@@ -627,7 +629,7 @@ async function loadHistory() {
 function appendMessage(m) {
   if (document.getElementById('m' + m.id)) return;
   el.list.querySelector('.empty')?.remove();
-  if (m.id > state.lastId) state.lastId = m.id;
+  if (m.id > state.lastId) store.set({ lastId: m.id });
   el.list.appendChild(messageEl(m));
   scrollIfNearBottom();
 }
@@ -677,7 +679,7 @@ function connectStream() {
 
   es.addEventListener('presence', (e) => {
     const { agents } = JSON.parse(e.data);
-    if (agents) { state.agents = agents; renderMembers(); }
+    if (agents) store.set({ agents });
   });
 
   es.addEventListener('typing', (e) => {
@@ -946,9 +948,9 @@ function renderDiscussionBar(record) {
 
 /** Switch the visible room. Discussions live in their own room. */
 async function enterRoom(room) {
-  state.room = room;
+  store.set({ room });
   el.list.innerHTML = '';
-  state.lastId = 0;
+  store.set({ lastId: 0 });
   await loadHistory();
 }
 
@@ -1090,7 +1092,7 @@ async function send() {
     }
     el.input.value = '';
     clearPendingRefs();
-    state.pendingImages = [];
+    store.set({ pendingImages: [] });
     renderPendingImages();
     autosize();
     el.input.focus();
@@ -1102,7 +1104,7 @@ async function send() {
 }
 
 function clearPendingRefs() {
-  state.pendingRefs = [];
+  store.set({ pendingRefs: [] });
   el.pendingRefs.innerHTML = '';
 }
 
@@ -1113,7 +1115,7 @@ function addPendingRef(ref) {
   chip.className = 'pending-ref';
   chip.innerHTML = `📎 ${escapeHtml(ref.title || ref.id)} <button type="button" title="移除">×</button>`;
   chip.querySelector('button').addEventListener('click', () => {
-    state.pendingRefs = state.pendingRefs.filter((r) => r !== ref);
+    store.set({ pendingRefs: state.pendingRefs.filter((r) => r !== ref) });
     chip.remove();
   });
   el.pendingRefs.appendChild(chip);
@@ -1193,7 +1195,7 @@ el.panelTabs.addEventListener('click', (e) => {
   const btn = e.target.closest('.panel-tab');
   if (!btn) return;
   if (btn.id === 'panelBack') { togglePanel(false); return; } // mobile: back to chat
-  state.surface = btn.dataset.surface;
+  store.set({ surface: btn.dataset.surface });
   renderPanel();
 });
 
@@ -1204,13 +1206,64 @@ el.panelBody.addEventListener('click', (e) => {
   addPendingRef({ surface: state.surface, id: item.dataset.id, title: item.dataset.title });
 });
 
-function togglePanel(force) {
-  state.panelOpen = force !== undefined ? force : !state.panelOpen;
-  el.app.classList.toggle('with-panel', state.panelOpen);
-  el.panelToggle.classList.toggle('active', state.panelOpen);
-  localStorage.setItem('hub.panel', state.panelOpen ? '1' : '0');
-  if (state.panelOpen) renderPanel();
+// The workspace panel is a full-screen drawer on narrow screens. Keep the
+// browser's Back gesture in sync with it: opening pushes one history entry,
+// Back / Swipe / Esc close it, and focus returns to the toggle button.
+const drawerMQ = window.matchMedia('(max-width: 900px)');
+let panelHistoryEntry = false;
+
+function setPanelDom(next) {
+  store.set({ panelOpen: next });
+  el.app.classList.toggle('with-panel', next);
+  el.panelToggle.classList.toggle('active', next);
+  localStorage.setItem('hub.panel', next ? '1' : '0');
+  // While the drawer covers the chat, make the covered regions inert so
+  // keyboard and screen-reader focus stays in the drawer.
+  const covered = [el.app.querySelector('main'), document.querySelector('footer')];
+  for (const node of covered) {
+    if (!node) continue;
+    if (next && drawerMQ.matches) node.setAttribute('inert', '');
+    else node.removeAttribute('inert');
+  }
+  if (next) renderPanel();
 }
+
+function togglePanel(force, opts = {}) {
+  const prev = state.panelOpen;
+  const next = force !== undefined ? force : !prev;
+  setPanelDom(next);
+
+  if (!opts.fromPop && drawerMQ.matches) {
+    if (next && !prev) {
+      history.pushState({ athPanel: true }, '');
+      panelHistoryEntry = true;
+    } else if (!next && prev && panelHistoryEntry) {
+      panelHistoryEntry = false;
+      history.back();
+    }
+  }
+
+  if (next && !prev) el.panelTabs.querySelector('.panel-tab')?.focus();
+  else if (!next && prev) el.panelToggle.focus();
+}
+
+window.addEventListener('popstate', (e) => {
+  panelHistoryEntry = false;
+  // Only the drawer owns a history entry; in the desktop side-bar layout a
+  // browser Back must not dismiss the panel.
+  if (drawerMQ.matches && state.panelOpen && !(e.state && e.state.athPanel)) {
+    togglePanel(false, { fromPop: true });
+  }
+});
+
+// If the viewport grows out of drawer mode while it is open, drop inert.
+drawerMQ.addEventListener('change', () => {
+  if (!drawerMQ.matches) {
+    const covered = [el.app.querySelector('main'), document.querySelector('footer')];
+    for (const node of covered) node?.removeAttribute('inert');
+    panelHistoryEntry = false;
+  }
+});
 
 /* ══════════════════════════════════════════════════════
    Wiring
@@ -1237,7 +1290,7 @@ el.input.addEventListener('blur', () => setTimeout(hidePop, 120));
 
 el.asWho.value = state.me;
 el.asWho.addEventListener('change', () => {
-  state.me = el.asWho.value;
+  store.set({ me: el.asWho.value });
   localStorage.setItem('hub.identity', state.me);
 });
 
@@ -1256,12 +1309,19 @@ if (!CSS.supports('container-type', 'scroll-state')) {
    only window into module scope. Read-only by convention. */
 window.__hub = { state, streams, el };
 
+/* One subscription drives the member strip and mention list. Views no longer
+   have to remember to call renderMembers() after every write. */
+store.subscribe((_s, keys) => {
+  if (keys.has('agents') || keys.has('busy') || keys.has('dialogs')) renderMembers();
+});
+
 /* ── boot ── */
 (async () => {
   await loadState();
   await loadHistory();
   connectStream();
-  if (state.panelOpen) togglePanel(true);
+  // Initial render from localStorage: paint without pushing a history entry.
+  if (state.panelOpen) setPanelDom(true);
   el.input.focus();
 
   // Slow refresh: presence is pushed via SSE, but a poll also covers a missed event.
@@ -1269,8 +1329,8 @@ window.__hub = { state, streams, el };
     try {
       const r = await fetch('/api/state');
       const j = await r.json();
-      state.agents = j.agents || state.agents;
-      state.busy = new Set(j.busy || []);
+      store.set({ agents: j.agents || state.agents });
+      store.set({ busy: new Set(j.busy || []) });
       renderMembers();
     } catch { /* offline */ }
   }, 15000);

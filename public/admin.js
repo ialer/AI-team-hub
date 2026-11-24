@@ -38,9 +38,12 @@ function rowHtml(m){
 export async function mountMembersPanel(body, foot){
   ensureDialogs();
   if(!token()){
-    body.innerHTML='<div class="mem-wrap"><div class="mem-unlock"><input type="password" id="athTok" placeholder="admin token" aria-label="管理员令牌"><button id="athUnlock">解锁</button></div><div class="mem-hint">🔒 未解锁 · 成员状态只读。输入 admin token 后可禁用/移除成员、改头像、生成接入协议。</div></div>';
+    // The member list is public state — always show it read-only, with the
+    // unlock bar above it. Only the management controls are gated.
+    body.innerHTML='<div class="mem-wrap"><div class="mem-unlock"><input type="password" id="athTok" placeholder="admin token" aria-label="管理员令牌"><button id="athUnlock">解锁</button></div><div class="mem-hint" id="memLockedHint">🔒 只读视图 · 输入 admin token 后可管理成员。</div><div id="memListRO"></div></div>';
     foot.innerHTML='<button class="mem-grant" id="athGrant" disabled>＋ 生成接入协议</button>';
     bindUnlock(body,foot);
+    await renderReadOnly(body.querySelector('#memListRO'));
     return;
   }
   await renderList(body,foot);
@@ -63,6 +66,21 @@ function bindUnlock(body,foot){
     }
   };
 }
+async function renderReadOnly(host){
+  if(!host) return;
+  let state;
+  try{ state=await api('/api/state'); }catch(e){ host.innerHTML='<div class="mem-hint">成员列表加载失败：'+esc(e.message)+'</div>'; return; }
+  const agents=Object.values(state.agents||{});
+  if(!agents.length){ host.innerHTML='<div class="mem-hint">暂无成员</div>'; return; }
+  const on=agents.filter(function(a){return a.enabled;});
+  const off=agents.filter(function(a){return !a.enabled;});
+  const row=function(m){ return '<div class="mem-row disabled">'+avHtml(m.avatar)+'<div><div class="mem-name">'+esc(m.name)+'<span class="mem-id">'+esc(m.id)+'</span></div><div class="mem-role">'+esc(m.role||'')+'</div><div class="mem-badges"><span class="mem-badge'+(m.online?' on':'')+'">'+(m.online?'在线':'离线')+'</span></div></div></div>'; };
+  let h='';
+  if(on.length) h+='<div class="mem-group"><span>启用 · '+on.length+' 人</span><span>'+on.filter(function(a){return a.online;}).length+' 在线</span></div>'+on.map(row).join('');
+  if(off.length) h+='<div class="mem-group"><span>已禁用 · '+off.length+'</span></div>'+off.map(row).join('');
+  host.innerHTML=h;
+}
+
 async function renderList(body,foot){
   let state;
   try{ state=await api('/api/state'); }
