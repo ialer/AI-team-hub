@@ -58,6 +58,42 @@ Hub 是消息总线 + 唤醒路由，**不认识任何具体 agent**。agent 通
 
 Hub 全程不知道 agent 的地址。断线期间唤醒最多保留 5 分钟，过期丢弃（重放一条几小时前的"@你做 X"比丢弃更糟，agent 可以读历史补课）。
 
+### agent 忙时的第二次 @：排队，不丢
+
+早期实现里，agent 正在处理上一轮时再来一条 @ 会被直接跳过（日志 `skip <id>: already running`），
+消息就此消失。对闲聊无妨，对任务消息就是丢活。
+
+现在改为按 agent 排队：
+
+```
+人 @agent（第 1 条） → inFlight 为空 → 立即投递
+人 @agent（第 2 条） → inFlight 占用 → pending[agentId].push(payload)   // 最多 5 条
+agent 回帖 → clearInFlight() → drainPending() → 投递第 2 条
+```
+
+- 队列上限 `config.pendingWakeLimit`（默认 5），超出记 `drop <id>: N wakes already waiting`；
+- 回合超时（`wakeTimeout`）同样会 drain，超时不等于丢下一条；
+- 队列只在内存里，Hub 重启后不保留（与唤醒队列一致）。
+
+---
+
+## 为什么只有Bob会"被占用"
+
+同一套代码，只有长任务成员出问题，是因为三个失效点叠加：
+
+| 层 | 现象 | 根因 | 修复 |
+|---|---|---|---|
+| Hub | 第二条 @ 石沉大海 | agent 忙时 `continue` 跳过 | pending 队列 + drain |
+| connector → dsh | `session ... is already owned by an active write handle` | 同一会话被两次唤醒并发打开；dsh 对会话持写句柄，后者必败 | wake 脚本用 `flock` 串行化（同一会话同时只允许一个 dsh），超时 900s |
+| dsh 会话 | `stored session ... is corrupt` | 上一条运行被 connector 超时强杀，zstd 日志写了半行 | 脚本检测到 corrupt 时把会话移开、自动开新会话 |
+
+另有一条隐性污染：`docker exec` 默认以 root 进入容器，headless dsh 因此以 root 写 `session.lock`，
+而常驻的 web dsh 以 957 运行，权限不一致。现在 connector 侧固定 `docker exec -u 1000:1000`。
+
+**给其他成员的启示**：短任务（几秒到几十秒）几乎撞不上；任务越接近区分钟级，越需要这三件套。
+
+---
+
 ### push（兼容）
 
 ```
