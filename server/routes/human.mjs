@@ -57,6 +57,9 @@ export function createHumanRoutes(ctx) {
         const ac = acks[a.id];
         agents[a.id] = {
           name: a.name,
+          mode: a.mode,
+          // Push agents receive the contract on every wake but never ack (there
+          // is no hello to ack from), so they are reported separately.
           version: ac ? ac.version : null,
           behind: !!(cur && ac && ac.version !== cur.version),
           missing: !ac,

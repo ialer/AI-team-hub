@@ -1162,19 +1162,23 @@ async function renderContractBadge() {
     const d = await r.json();
     const c = d.contract;
     if (!c) { host.hidden = true; return; }
-    const total = Object.keys(d.agents).length;
-    const synced = Object.values(d.agents).filter((a) => a.version === c.version).length;
-    const behind = Object.entries(d.agents).filter(([, a]) => a.version && a.version !== c.version);
-    const missing = Object.entries(d.agents).filter(([, a]) => !a.version);
-    const state = synced === total ? 'ok' : (synced > 0 ? 'part' : 'none');
+    // Push agents get the contract injected but never ack, so they are counted
+    // separately instead of showing up as "not synced".
+    const entries = Object.entries(d.agents);
+    const dialers = entries.filter(([, a]) => a.mode !== 'push');
+    const pushed = entries.filter(([, a]) => a.mode === 'push');
+    const total = dialers.length;
+    const synced = dialers.filter(([, a]) => a.version === c.version).length;
+    const state = total === 0 ? 'ok' : (synced === total ? 'ok' : (synced > 0 ? 'part' : 'none'));
     host.hidden = false;
     host.dataset.state = state;
-    host.textContent = `团队契约 v${c.version} · ${synced}/${total} 已同步`;
-    if (behind.length || missing.length) {
-      host.title = '未同步：' + [...behind.map(([id, a]) => `${id} v${a.version}`), ...missing.map(([id]) => `${id} 未回执`)].join('、');
-    } else {
-      host.title = '';
-    }
+    host.textContent = `团队契约 v${c.version} · ${synced}/${total} 已同步`
+      + (pushed.length ? ` · ${pushed.map(([id]) => id).join('、')}(推送)` : '');
+    const behind = dialers.filter(([, a]) => a.version && a.version !== c.version);
+    const missing = dialers.filter(([, a]) => !a.version);
+    host.title = (behind.length || missing.length)
+      ? '未同步：' + [...behind.map(([id, a]) => `${id} v${a.version}`), ...missing.map(([id]) => `${id} 未回执`)].join('、')
+      : '';
   } catch {
     host.hidden = true;
   }
