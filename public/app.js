@@ -1143,6 +1143,43 @@ const SURFACES = [
   { id: 'members', label: '成员' },
 ];
 
+/**
+ * Team contract status line above the shelf: which version is active and how
+ * many agents are on it. Colour is never the only signal - the text carries
+ * "N/M" and the version, so it stays readable without colour vision.
+ */
+async function renderContractBadge() {
+  let host = document.getElementById('contractBadge');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'contractBadge';
+    host.className = 'contract-badge';
+    el.panelTabs.after(host);
+  }
+  try {
+    const r = await fetch('/api/contract');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const c = d.contract;
+    if (!c) { host.hidden = true; return; }
+    const total = Object.keys(d.agents).length;
+    const synced = Object.values(d.agents).filter((a) => a.version === c.version).length;
+    const behind = Object.entries(d.agents).filter(([, a]) => a.version && a.version !== c.version);
+    const missing = Object.entries(d.agents).filter(([, a]) => !a.version);
+    const state = synced === total ? 'ok' : (synced > 0 ? 'part' : 'none');
+    host.hidden = false;
+    host.dataset.state = state;
+    host.textContent = `团队契约 v${c.version} · ${synced}/${total} 已同步`;
+    if (behind.length || missing.length) {
+      host.title = '未同步：' + [...behind.map(([id, a]) => `${id} v${a.version}`), ...missing.map(([id]) => `${id} 未回执`)].join('、');
+    } else {
+      host.title = '';
+    }
+  } catch {
+    host.hidden = true;
+  }
+}
+
 async function renderPanel() {
   el.panelTabs.innerHTML = SURFACES.map((s) =>
     `<button class="panel-tab" role="tab" data-surface="${s.id}" aria-selected="${s.id === state.surface}" tabindex="${s.id === state.surface ? '0' : '-1'}">${s.label}</button>`
@@ -1158,6 +1195,8 @@ async function renderPanel() {
     await mountMembersPanel(el.panelBody, el.panelFoot);
     return;
   }
+
+  renderContractBadge();
 
   el.panelBody.innerHTML = '<div class="empty" style="padding:24px">加载中…</div>';
   mountSurfaceActions(el.panelFoot, want, () => { if (state.surface === want) renderPanel(); });

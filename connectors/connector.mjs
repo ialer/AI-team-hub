@@ -120,13 +120,14 @@ function startPollTransport({ hubBase, agentId, auth, onWake, log, stopFlag, onc
  * Requires a global WebSocket (Node 22+). Returns null when unavailable so the
  * caller can silently fall back to polling.
  */
-function startWsTransport({ hubBase, agentId, token, onWake, log, stopFlag }) {
+function startWsTransport({ hubBase, agentId, token, onWake, log, stopFlag, onOpen }) {
   if (typeof WebSocket !== 'function') return null;
 
   const wsUrl = hubBase.replace(/^http/, 'ws')
     + `/ws?role=agent&agent=${encodeURIComponent(agentId)}&token=${encodeURIComponent(token)}`;
 
   const state = { ws: null, ready: false, stopped: false };
+  let firstOpen = true;
 
   const connect = () => {
     if (stopFlag.stopping) return;
@@ -136,6 +137,12 @@ function startWsTransport({ hubBase, agentId, token, onWake, log, stopFlag }) {
     ws.addEventListener('open', () => {
       state.ready = true;
       log('ws connected');
+      // The first open is covered by the startup hello; every later one means the
+      // hub restarted or dropped us, so re-read the contract instead of running
+      // on the values this process was started with.
+      if (!onOpen) return;
+      if (firstOpen) { firstOpen = false; return; }
+      void onOpen();
     });
 
     ws.addEventListener('message', async (e) => {
@@ -219,19 +226,43 @@ async function main() {
   /* Team contract: the hub hands it over on connect; this agent persists it
      locally and confirms the version it is now running on. */
   let contract = hello.contract || null;
-  if (contract) {
-    const f = writeContractFile(contract);
-    log(`contract v${contract.version} (${contract.sha256.slice(0, 12)})${f ? ' -> ' + f : ' (not persisted)'}`);
+
+  /** Persist the contract locally and report the version we now run on. */
+  const applyContract = async (c) => {
+    if (!c) return;
+    const f = writeContractFile(c);
+    log(`contract v${c.version} (${c.sha256.slice(0, 12)})${f ? ' -> ' + f : ' (not persisted)'}`);
     try {
       await api('/api/agent/contract-ack', {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version: contract.version, sha256: contract.sha256 }),
+        body: JSON.stringify({ version: c.version, sha256: c.sha256 }),
       }, 10_000);
     } catch (e) {
       log(`contract ack failed: ${e.message}`);
     }
-  }
+  };
+
+  await applyContract(contract);
+
+  /** Re-read the contract after a reconnect; no-op when nothing changed. */
+  const refreshContract = async () => {
+    try {
+      const h = await api('/api/agent/hello', {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      }, 15_000);
+      if (h.sessionId) sessionId = h.sessionId;
+      if (h.contract && (!contract || h.contract.sha256 !== contract.sha256)) {
+        contract = h.contract;
+        await applyContract(contract);
+        log('contract refreshed after reconnect');
+      }
+    } catch (e) {
+      log(`contract refresh failed: ${e.message}`);
+    }
+  };
 
   let stopping = false;
   const stopFlag = { get stopping() { return stopping; } };
@@ -250,6 +281,7 @@ async function main() {
     log,
     stopFlag,
     onWake: (ev, meta) => handleWake(ev, meta),
+    onOpen: refreshContract,
   });
 
   if (wsTransport && !args.once) {
