@@ -203,3 +203,22 @@ jobs:
               if (!h.version) { console.error('health missing version'); process.exit(1); }
             });"
           echo "health ok"
+
+      - name: Metrics endpoint aggregates without leaking content
+        run: |
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+          curl -sf -X POST http://127.0.0.1:8899/api/say \
+            -H 'Content-Type: application/json' \
+            -d '{"room":"team","from":"human","text":"metrics seed"}' > /dev/null
+          curl -sf http://127.0.0.1:8899/api/metrics | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const m=JSON.parse(s);
+              if (m.ok !== true) { console.error('metrics not ok'); process.exit(1); }
+              if (!(m.messages.total >= 1)) { console.error('metrics missing message count'); process.exit(1); }
+              const raw = JSON.stringify(m);
+              if (raw.includes('metrics seed')) { console.error('metrics leaked message text'); process.exit(1); }
+            });"
+          echo "metrics ok"

@@ -96,6 +96,11 @@ export class MessageLog {
   rooms() {
     return [...new Set(this.items.map((m) => m.room))];
   }
+
+  /** The whole in-memory window (oldest first). Used for aggregate metrics. */
+  all() {
+    return this.items.slice();
+  }
 }
 
 /** Small JSON document store for session ids and dialogs. */

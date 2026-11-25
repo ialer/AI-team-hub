@@ -340,7 +340,10 @@ export class DiscussionManager {
         const prompt = this._buildPrompt(record, speaker, record.turns.length + 1, state);
         const reply = await this._ask(record, speaker, prompt, state);
         if (state.stopped) break;
-        if (reply && !reply.listen) {
+        if (reply && reply.listen) {
+          record.skips = record.skips || [];
+          record.skips.push({ speaker, question: qi, at: Date.now(), phase: 'synthesis' });
+        } else if (reply && !reply.listen) {
           const turn = {
             n: record.turns.length + 1,
             speaker,
