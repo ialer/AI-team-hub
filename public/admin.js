@@ -220,3 +220,124 @@ document.addEventListener('click',async function(e){
     setTimeout(function(){ e.target.removeAttribute('data-copied'); e.target.removeAttribute('data-failed'); e.target.textContent='⧉'; if(tip) tip.textContent=''; },2000);
   }
 },{capture:true});
+
+/* ══════════════════════════════════════════════════════
+   Surface write actions (docs / tasks / files)
+   The shelf is read-only by nature; these are the only ways
+   to put something on it without touching the server's disk.
+   ══════════════════════════════════════════════════════ */
+
+const SURFACE_META = {
+  docs: { label: '新建文档', kind: 'doc' },
+  tasks: { label: '新建任务', kind: 'task' },
+  files: { label: '上传文件', kind: 'file' },
+};
+
+function surfaceErr(msg) {
+  const d = document.getElementById('athSurfaceDlg');
+  dlgErr(d, msg);
+}
+
+function ensureSurfaceDialog() {
+  if (document.getElementById('athSurfaceDlg')) return;
+  const d = document.createElement('dialog');
+  d.className = 'ath-dlg';
+  d.id = 'athSurfaceDlg';
+  d.innerHTML =
+    '<div class="ath-dlg-hd"><h2 id="athSurfTitle">新建</h2><span class="ath-dlg-tag" id="athSurfTag"></span></div>' +
+    '<div class="ath-dlg-body" id="athSurfBody"></div>' +
+    '<div class="ath-dlg-ft"><button class="ath-ghost" id="athSurfCancel">取消</button>' +
+    '<button class="ath-go" id="athSurfSave">保存</button></div>';
+  document.body.appendChild(d);
+  d.querySelector('#athSurfCancel').onclick = () => d.close();
+}
+
+/** Render the shelf's action button into the panel footer. */
+export function mountSurfaceActions(foot, surface, onDone) {
+  const meta = SURFACE_META[surface];
+  if (!meta || !foot) return;
+  foot.innerHTML = '<button class="mem-grant" id="athSurfAdd">＋ ' + meta.label + '</button>';
+  const btn = foot.querySelector('#athSurfAdd');
+  btn.onclick = () => openSurfaceDialog(surface, onDone);
+}
+
+function openSurfaceDialog(surface, onDone) {
+  if (!token()) { con('请先在「成员」标签解锁（需要 admin token）'); return; }
+  ensureSurfaceDialog();
+  const d = document.getElementById('athSurfaceDlg');
+  dlgErrClear(d);
+  const body = d.querySelector('#athSurfBody');
+  d.querySelector('#athSurfTag').textContent = surface;
+
+  if (surface === 'docs') {
+    body.innerHTML =
+      '<div class="ath-fld"><label for="svTitle">文件名</label><input id="svTitle" placeholder="deploy-plan"></div>' +
+      '<div class="ath-fld"><label for="svBody">内容（Markdown）</label>' +
+      '<textarea id="svBody" rows="10" style="background:#16181c;border:1px solid #2f3336;border-radius:10px;padding:10px 12px;color:#e7e9ea;font-family:var(--mono);font-size:12px;outline:0"></textarea></div>';
+  } else if (surface === 'tasks') {
+    body.innerHTML =
+      '<div class="ath-grid2"><div class="ath-fld"><label for="svTaskId">任务 id</label><input id="svTaskId" placeholder="t-20261125-1"></div>' +
+      '<div class="ath-fld"><label for="svTaskStatus">状态</label><input id="svTaskStatus" value="todo"></div></div>' +
+      '<div class="ath-fld"><label for="svTaskTitle">标题</label><input id="svTaskTitle" placeholder="迁移 Hub 到新架构"></div>' +
+      '<div class="ath-fld"><label for="svTaskOwner">负责人（可选）</label><input id="svTaskOwner" placeholder="bob"></div>';
+  } else {
+    body.innerHTML =
+      '<div class="ath-fld"><label for="svFileName">文件名</label><input id="svFileName" placeholder="report.csv"></div>' +
+      '<div class="ath-fld"><label>选择文件<input type="file" id="svFile" hidden><button type="button" class="ath-ghost" id="svPick" style="margin-top:4px">选择文件</button></label>' +
+      '<div class="hint" id="svFileHint">未选择</div></div>';
+    body.querySelector('#svPick').onclick = () => body.querySelector('#svFile').click();
+    body.querySelector('#svFile').onchange = (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      body.querySelector('#svFileName').value = f.name;
+      body.querySelector('#svFileHint').textContent = f.name + ' · ' + Math.round(f.size / 1024) + ' KB';
+    };
+  }
+
+  d.querySelector('#athSurfSave').onclick = async () => {
+    try {
+      if (surface === 'docs') {
+        const title = body.querySelector('#svTitle').value.trim();
+        if (!title) return surfaceErr('请填文件名');
+        await api('/api/surface/docs', {
+          method: 'POST',
+          json: { id: title, content: body.querySelector('#svBody').value },
+        });
+        con('文档已保存：' + title);
+      } else if (surface === 'tasks') {
+        const id = body.querySelector('#svTaskId').value.trim();
+        if (!id) return surfaceErr('请填任务 id');
+        await api('/api/surface/tasks', {
+          method: 'POST',
+          json: {
+            upsert: {
+              id,
+              title: body.querySelector('#svTaskTitle').value.trim() || id,
+              status: body.querySelector('#svTaskStatus').value.trim() || 'todo',
+              owner: body.querySelector('#svTaskOwner').value.trim() || undefined,
+            },
+          },
+        });
+        con('任务已保存：' + id);
+      } else {
+        const file = body.querySelector('#svFile').files[0];
+        if (!file) return surfaceErr('请选择文件');
+        const name = body.querySelector('#svFileName').value.trim() || file.name;
+        const r = await fetch('/api/surface/files?name=' + encodeURIComponent(name), {
+          method: 'POST',
+          headers: { 'x-admin-token': token() },
+          body: file,
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+        con('文件已上传：' + (j.item && j.item.id ? j.item.id : name));
+      }
+      d.close();
+      if (typeof onDone === 'function') onDone();
+    } catch (e) {
+      surfaceErr('保存失败：' + (e.message || e));
+    }
+  };
+
+  d.showModal();
+}

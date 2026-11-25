@@ -11,6 +11,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * Turn a caller-supplied name into a safe, single path segment.
+ * Rejects anything that could escape the surface directory.
+ */
+function safeName(input, ext = '') {
+  const raw = String(input || '').trim();
+  if (!raw) throw Object.assign(new Error('name required'), { status: 400 });
+  const base = path.basename(raw).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').slice(0, 120);
+  if (!base || base === '.' || base === '..') throw Object.assign(new Error('bad name'), { status: 400 });
+  return ext && !base.toLowerCase().endsWith(ext) ? base + ext : base;
+}
+
 export function createSurfaces({ dataDir, log }) {
   const docsDir = path.join(dataDir, 'docs');
   const filesDir = path.join(dataDir, 'files');
@@ -41,6 +53,16 @@ export function createSurfaces({ dataDir, log }) {
       if (!fs.existsSync(file)) throw new Error('not found');
       return { mime: 'text/markdown', content: fs.readFileSync(file, 'utf8') };
     },
+    /** Create or overwrite one Markdown document. */
+    async write({ id, content, overwrite = true }) {
+      const name = safeName(id, '.md');
+      const file = path.join(docsDir, name);
+      if (!overwrite && fs.existsSync(file)) throw Object.assign(new Error('exists'), { status: 409 });
+      fs.writeFileSync(file, String(content ?? ''), 'utf8');
+      const st = fs.statSync(file);
+      log.line(`surface docs write ${name} (${st.size}B)`);
+      return { id: name, title: name.replace(/\.md$/, ''), meta: `${Math.round(st.size / 1024)} KB · ${st.mtime.toISOString().slice(0, 16).replace('T', ' ')}` };
+    },
   };
 
   /* ── tasks: one JSON array ───────────────────────────── */
@@ -62,6 +84,40 @@ export function createSurfaces({ dataDir, log }) {
       const t = (all || []).find((x) => x.id === id);
       if (!t) throw new Error('not found');
       return { mime: 'application/json', content: JSON.stringify(t, null, 2) };
+    },
+    /** Upsert or delete one task; the whole array is rewritten atomically. */
+    async write({ upsert, remove }) {
+      let all = [];
+      try { all = JSON.parse(fs.readFileSync(tasksFile, 'utf8')); } catch { /* empty */ }
+      if (!Array.isArray(all)) all = [];
+
+      if (remove) {
+        const before = all.length;
+        all = all.filter((x) => x && x.id !== remove);
+        if (all.length === before) throw Object.assign(new Error('not found'), { status: 404 });
+      } else {
+        const t = upsert || {};
+        const id = String(t.id || '').trim();
+        if (!id) throw Object.assign(new Error('task needs an id'), { status: 400 });
+        const clean = {
+          id,
+          title: String(t.title || id).slice(0, 200),
+          status: String(t.status || 'todo').slice(0, 32),
+          ...(t.owner ? { owner: String(t.owner).slice(0, 64) } : {}),
+        };
+        const i = all.findIndex((x) => x && x.id === id);
+        if (i >= 0) all[i] = { ...all[i], ...clean };
+        else all.push(clean);
+      }
+
+      const tmp = `${tasksFile}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(all, null, 2), 'utf8');
+      fs.renameSync(tmp, tasksFile);
+      log.line(`surface tasks write (${all.length} total)`);
+      return (remove ? all : all.filter((x) => x.id === (upsert && upsert.id))).map((x) => ({
+        id: x.id, title: x.title || x.id,
+        meta: [x.status || 'todo', x.owner ? '@' + x.owner : null].filter(Boolean).join(' · '),
+      }));
     },
   };
 
@@ -89,6 +145,16 @@ export function createSurfaces({ dataDir, log }) {
       if (!fs.existsSync(file)) throw new Error('not found');
       return { mime: 'application/octet-stream', content: fs.readFileSync(file, 'utf8') };
     },
+    /** Drop one file into data/files (binary safe). */
+    async write({ name, buffer, overwrite = true }) {
+      const safe = safeName(name, '');
+      const file = path.join(filesDir, safe);
+      if (!overwrite && fs.existsSync(file)) throw Object.assign(new Error('exists'), { status: 409 });
+      fs.writeFileSync(file, buffer);
+      const st = fs.statSync(file);
+      log.line(`surface files write ${safe} (${st.size}B)`);
+      return { id: safe, title: safe, meta: `${Math.round(st.size / 1024)} KB` };
+    },
   };
 
   const byId = new Map([docs, tasks, files].map((s) => [s.id, s]));
@@ -105,6 +171,11 @@ export function createSurfaces({ dataDir, log }) {
       const s = byId.get(id);
       if (!s) throw new Error(`unknown surface ${id}`);
       return s.fetch(refId);
+    },
+    async write(id, payload) {
+      const s = byId.get(id);
+      if (!s || !s.write) throw Object.assign(new Error(`surface ${id} is read-only`), { status: 400 });
+      return s.write(payload || {});
     },
   };
 }

@@ -237,3 +237,35 @@ jobs:
             let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(String(JSON.parse(s).messages.length)));")
           [ "$N" = "1" ] || { echo "taskId filter returned $N messages, expected 1"; exit 1; }
           echo "taskId filter ok"
+
+      - name: Surfaces accept writes behind an admin token
+        run: |
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+          B=http://127.0.0.1:8899
+          ADM=ci-test-token
+
+          # anonymous write must be rejected
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/api/surface/docs \
+                 -H 'Content-Type: application/json' -d '{"id":"x","content":"x"}')
+          [ "$code" = "401" ] || { echo "anonymous write should be 401, got $code"; exit 1; }
+
+          # admin write, then read it back through the shelf
+          curl -sf -X POST $B/api/surface/docs -H "X-Admin-Token: $ADM" \
+            -H 'Content-Type: application/json' -d '{"id":"ci-note","content":"# hi"}' > /dev/null
+          N=$(curl -sf "$B/api/surface/docs" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+              const it=JSON.parse(s).items;process.stdout.write(String(it.filter(i=>i.id==='ci-note.md').length));});")
+          [ "$N" = "1" ] || { echo "written doc not listed ($N)"; exit 1; }
+
+          BODY=$(curl -sf "$B/api/surface/docs/ci-note.md")
+          [ "$BODY" = "# hi" ] || { echo "doc content mismatch: [$BODY]"; exit 1; }
+
+          curl -sf -X POST $B/api/surface/tasks -H "X-Admin-Token: $ADM" \
+            -H 'Content-Type: application/json' -d '{"upsert":{"id":"t1","title":"x","status":"todo"}}' > /dev/null
+          T=$(curl -sf "$B/api/surface/tasks" | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(String(JSON.parse(s).items.length)));")
+          [ "$T" = "1" ] || { echo "task not written ($T)"; exit 1; }
+          echo "surface write ok"

@@ -11,7 +11,7 @@
    State
    ══════════════════════════════════════════════════════ */
 
-import { mountMembersPanel } from './admin.js';
+import { mountMembersPanel, mountSurfaceActions } from './admin.js';
 import { createStore } from './store.mjs';
 
 const store = createStore({
@@ -1160,7 +1160,7 @@ async function renderPanel() {
   }
 
   el.panelBody.innerHTML = '<div class="empty" style="padding:24px">加载中…</div>';
-  el.panelFoot.textContent = '点条目可加入下一条消息';
+  mountSurfaceActions(el.panelFoot, want, () => { if (state.surface === want) renderPanel(); });
 
   try {
     const r = await fetch(`/api/surface/${want}`);
