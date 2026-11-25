@@ -709,15 +709,37 @@ textarea::placeholder { color: var(--text-faint); }
 
 .panel-body { flex: 1; overflow-y: auto; padding: 10px; display: grid; gap: 6px; align-content: start; }
 
+/* Title row: the name takes the free space and truncates, the author badge keeps the
+   right edge. min-inline-size:0 lets both the row and the name shrink inside the grid. */
+.surface-item .t {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+.surface-item .tt {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .surface-item .by {
-  margin-left: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  max-inline-size: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0 6px;
   border-radius: 99px;
   border: 1px solid var(--line);
   color: var(--text-dim);
   font-size: 10px;
   font-family: var(--mono);
-  vertical-align: 1px;
+  line-height: 16px;
 }
 
 .surface-item {
@@ -729,8 +751,7 @@ textarea::placeholder { color: var(--text-faint); }
   display: grid; gap: 3px;
 }
 .surface-item:hover { border-color: var(--line-strong); background: rgba(29, 155, 240, .05); }
-.surface-item .t { font-size: 13px; color: var(--text); }
-.surface-item .m { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.surface-item .m { font-size: 11px; color: var(--text-faint); font-family: var(--mono); min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .panel-foot {
   padding: 8px 10px;
