@@ -116,3 +116,50 @@ test('an unknown surface cannot be written', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('items remember who wrote them', async () => {
+  const { s, dir } = makeSurfaces();
+  try {
+    await s.write('docs', { id: 'a', content: 'x', author: { id: 'bob', name: 'Bob' } });
+    await s.write('files', { name: 'b.txt', buffer: Buffer.from('y'), author: { id: 'human', name: '我' } });
+    await s.write('tasks', { upsert: { id: 't1', title: 'z' }, author: { id: 'carol', name: 'Carol' } });
+
+    const docs = await s.items('docs');
+    assert.equal(docs[0].by, 'bob');
+    assert.equal(docs[0].byName, 'Bob');
+
+    const files = await s.items('files');
+    assert.equal(files[0].byName, '我');
+
+    const tasks = await s.items('tasks');
+    assert.equal(tasks[0].byName, 'Carol');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an item written without an author has no badge data', async () => {
+  const { s, dir } = makeSurfaces();
+  try {
+    await s.write('docs', { id: 'anon', content: 'x' });
+    const [it] = await s.items('docs');
+    assert.equal(it.by, undefined);
+    assert.equal(it.byName, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('removing a task does not re-attribute the survivors', async () => {
+  const { s, dir } = makeSurfaces();
+  try {
+    await s.write('tasks', { upsert: { id: 't1', title: 'one' }, author: { id: 'a', name: '甲' } });
+    await s.write('tasks', { upsert: { id: 't2', title: 'two' }, author: { id: 'b', name: '乙' } });
+    await s.write('tasks', { remove: 't1', author: { id: 'c', name: '丙' } });
+    const left = await s.items('tasks');
+    assert.deepEqual(left.map((x) => x.id), ['t2']);
+    assert.equal(left[0].byName, '乙', 'survivor keeps its own author');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

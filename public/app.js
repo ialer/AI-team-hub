@@ -1174,7 +1174,7 @@ async function renderPanel() {
     }
     el.panelBody.innerHTML = items.map((it) => `
       <div class="surface-item" data-id="${escapeHtml(it.id)}" data-title="${escapeHtml(it.title || it.id)}" role="button" tabindex="0">
-        <span class="t">${escapeHtml(it.title || it.id)}</span>
+        <span class="t">${escapeHtml(it.title || it.id)}${it.byName ? `<span class="by" title="写入者">${escapeHtml(it.byName)}</span>` : ''}</span>
         <span class="m">${escapeHtml(it.meta || '')}</span>
       </div>`).join('');
   } catch {

@@ -24,6 +24,32 @@ function safeName(input, ext = '') {
 }
 
 export function createSurfaces({ dataDir, log }) {
+  /* Who put each item on the shelf. Kept beside the data (not inside it) so
+     markdown stays clean and binary files can be attributed at all. */
+  const authorsFile = path.join(dataDir, 'surface-authors.json');
+  let authors = {};
+  try { authors = JSON.parse(fs.readFileSync(authorsFile, 'utf8')) || {}; } catch { /* first run */ }
+
+  function rememberAuthor(surface, id, author) {
+    if (!author || !id) return;
+    authors[`${surface}:${id}`] = {
+      by: String(author.id || 'admin'),
+      name: String(author.name || author.id || 'admin'),
+      at: Date.now(),
+    };
+    try {
+      const tmp = `${authorsFile}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(authors, null, 2), 'utf8');
+      fs.renameSync(tmp, authorsFile);
+    } catch { /* attribution is best-effort, never blocks a write */ }
+  }
+
+  /** Attach the recorded author to a listed item (absent = unknown). */
+  function withAuthor(surface, item) {
+    const a = authors[`${surface}:${item.id}`];
+    return a ? { ...item, by: a.by, byName: a.name, byAt: a.at } : item;
+  }
+
   const docsDir = path.join(dataDir, 'docs');
   const filesDir = path.join(dataDir, 'files');
   const tasksFile = path.join(dataDir, 'tasks.json');
@@ -165,7 +191,8 @@ export function createSurfaces({ dataDir, log }) {
     async items(id) {
       const s = byId.get(id);
       if (!s) throw new Error(`unknown surface ${id}`);
-      return s.list();
+      const list = await s.list();
+      return list.map((x) => withAuthor(id, x));
     },
     async resolve(id, refId) {
       const s = byId.get(id);
@@ -175,7 +202,15 @@ export function createSurfaces({ dataDir, log }) {
     async write(id, payload) {
       const s = byId.get(id);
       if (!s || !s.write) throw Object.assign(new Error(`surface ${id} is read-only`), { status: 400 });
-      return s.write(payload || {});
+      const { author, ...rest } = payload || {};
+      const out = await s.write(rest);
+      // A removal has no new item to attribute.
+      if (!rest.remove) {
+        for (const it of Array.isArray(out) ? out : [out]) {
+          if (it && it.id) rememberAuthor(id, it.id, author);
+        }
+      }
+      return Array.isArray(out) ? out.map((x) => withAuthor(id, x)) : withAuthor(id, out);
     },
   };
 }

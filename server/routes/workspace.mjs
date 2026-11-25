@@ -10,15 +10,20 @@ const MAX_FILE_BYTES = 8_000_000;
  * rejected, and the surfaces module owns all path handling.
  */
 function authorizeWrite(ctx, req, url) {
-  const { registry } = ctx;
+  const { registry, config } = ctx;
   const admin = req.headers['x-admin-token'] || url.searchParams.get('admin') || '';
-  if (admin && registry.verifyAdmin(admin)) return 'admin';
+  if (admin && registry.verifyAdmin(admin)) {
+    // Panel writes are attributed to the human operator, not to "admin".
+    return { id: 'human', name: (config.human && config.human.name) || '我', kind: 'admin' };
+  }
 
   const id = req.headers['x-agent-id'] || '';
   const token = req.headers['x-agent-token'] || '';
   if (id && token) {
     const agent = registry.get(id);
-    if (agent && agent.enabled !== false && registry.verify(id, token)) return 'agent';
+    if (agent && agent.enabled !== false && registry.verify(id, token)) {
+      return { id: agent.id, name: agent.name || agent.id, kind: 'agent' };
+    }
   }
   return null;
 }
@@ -42,8 +47,8 @@ export function createWorkspaceRoutes(ctx) {
           const name = refId || url.searchParams.get('name') || '';
           const raw = await readBodyRaw(req, MAX_FILE_BYTES);
           if (!raw.length) { sendJson(res, 400, { error: 'empty body' }); return true; }
-          const item = await surfaces.write('files', { name, buffer: raw });
-          log.line(`surface files written by ${who}: ${item.id}`);
+          const item = await surfaces.write('files', { name, buffer: raw, author: who });
+          log.line(`surface files written by ${who.name}: ${item.id}`);
           sendJson(res, 200, { ok: true, item });
           return true;
         }
@@ -56,8 +61,9 @@ export function createWorkspaceRoutes(ctx) {
             id,
             content: body.content ?? body.text ?? '',
             overwrite: body.overwrite !== false,
+            author: who,
           });
-          log.line(`surface docs written by ${who}: ${item.id}`);
+          log.line(`surface docs written by ${who.name}: ${item.id}`);
           sendJson(res, 200, { ok: true, item });
           return true;
         }
@@ -66,8 +72,9 @@ export function createWorkspaceRoutes(ctx) {
           const items = await surfaces.write('tasks', {
             upsert: refId ? { ...(body.task || body), id: refId } : (body.upsert || body.task),
             remove: body.remove || null,
+            author: who,
           });
-          log.line(`surface tasks written by ${who}`);
+          log.line(`surface tasks written by ${who.name}`);
           sendJson(res, 200, { ok: true, items });
           return true;
         }
