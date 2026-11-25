@@ -89,6 +89,7 @@ curl http://hub:8899/api/surface/docs/deploy-plan.md
 | GET | `/api/surfaces` | 所有 surface 的 `{id, label}` |
 | GET | `/api/surface/:id` | `{items: [{id, title, meta}]}` |
 | GET | `/api/surface/:id/:refId` | 文件内容（带 mime） |
+| POST | `/api/surface/:id` | 写入（见上「写入」一节），需 admin 或 agent token |
 
 ---
 
@@ -117,8 +118,42 @@ const byId = new Map([docs, tasks, files, links].map((s) => [s.id, s]));
 
 ---
 
+## 写入（v0.4.1 起）
+
+工作台原本只能"往目录里丢文件"，没有入口——所以它一直是空的。现在三个 surface 都有写接口，
+**管理员和 agent 都能写**，这也是 agent 产物能自动出现在右栏的最小闭环。
+
+鉴权二选一：`x-admin-token`（面板/运维）或 `x-agent-id` + `x-agent-token`（agent 写自己的产出）。
+两者都没有 → 401。
+
+| 目标 | 请求 | 说明 |
+|---|---|---|
+| 文档 | `POST /api/surface/docs` `{ "id": "plan", "content": "# ..." }` | 自动补 `.md`；`overwrite:false` 时已存在返回 409 |
+| 文档（按路径） | `POST /api/surface/docs/plan.md` 同上 | 路径里的名字优先 |
+| 任务 | `POST /api/surface/tasks` `{ "upsert": {"id","title","status","owner"} }` | 同 id 覆盖，不重复追加 |
+| 任务（删除） | `POST /api/surface/tasks` `{ "remove": "t1" }` | 不存在返回 404 |
+| 文件 | `POST /api/surface/files?name=report.csv`，body 为原始字节 | `--data-binary`，上限 8 MB |
+
+限制：文档/任务 body ≤ 1 MB；文件名经 `safeName()` 归一（`basename` + 去控制字符 + 截断 120 字符），
+`../` 之类不会逃出目标目录——有单测覆盖。
+
+**面板入口**：工作台底部有「＋ 新建文档 / 新建任务 / 上传文件」，需要先在「成员」标签解锁
+（写入用存下来的 admin token）。未解锁点击只提示，不弹层。
+
+### agent 写入示例
+
+```bash
+curl -X POST http://hub:8899/api/surface/docs \
+  -H "X-Agent-Id: bob" -H "X-Agent-Token: $ATH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"deploy-report","content":"# 部署报告\n..."}'
+```
+
+---
+
 ## 一个刻意的限制
 
-**工作台不做编辑器。** 它只负责「找到东西」和「引用进对话」。真要改文档，用你自己的编辑器改 `data/docs/` 里的文件，或者让 agent 改。
+**工作台不做编辑器。** 它只负责「找到东西」「引用进对话」，以及上面那条最小的写入通道。
+真要长时间编辑文档，用你自己的编辑器改 `data/docs/` 里的文件，或者让 agent 改。
 
 理由是：一旦开始做富文本编辑器，就会滑向"再造一个 Notion"，而这个项目的价值是**通信**，不是文档编辑。
