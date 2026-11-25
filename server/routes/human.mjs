@@ -1,7 +1,7 @@
 import { sendJson, readBody } from '../http.mjs';
 
 export function createHumanRoutes(ctx) {
-  const { config, hub, messages, sse, dialogs, registry, discussions } = ctx;
+  const { config, hub, messages, sse, dialogs, registry, discussions, contract } = ctx;
   return async function humanRoutes(req, res, url, p) {
     if (p === '/api/state' && req.method === 'GET') { sendJson(res, 200, hub.state()); return true; }
 
@@ -45,6 +45,25 @@ export function createHumanRoutes(ctx) {
             : null,
         },
       });
+      return true;
+    }
+
+    /* The active team contract and how far each agent has synced to it. */
+    if (p === '/api/contract' && req.method === 'GET') {
+      const cur = contract.current();
+      const acks = contract.acks();
+      const agents = {};
+      for (const a of Object.values(registry.publicView())) {
+        const ac = acks[a.id];
+        agents[a.id] = {
+          name: a.name,
+          version: ac ? ac.version : null,
+          behind: !!(cur && ac && ac.version !== cur.version),
+          missing: !ac,
+          at: ac ? ac.at : null,
+        };
+      }
+      sendJson(res, 200, { contract: cur, agents });
       return true;
     }
 

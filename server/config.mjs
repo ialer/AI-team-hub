@@ -16,6 +16,7 @@ const DEFAULTS = {
   port: 8899,
   dataDir: path.join(ROOT, 'data'),
   publicDir: path.join(ROOT, 'public'),
+  contractFile: path.join(ROOT, 'contracts', 'team-contract.md'),
   defaultRoom: 'team',
   // How many trailing messages a woken agent receives as context.
   contextWindow: 10,

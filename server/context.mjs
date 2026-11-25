@@ -8,6 +8,7 @@ import { AgentRegistry } from './registry.mjs';
 import { SseHub, WakeQueue } from './transport.mjs';
 import { Hub } from './hub.mjs';
 import { createSurfaces } from './surfaces.mjs';
+import { createContract } from './contract.mjs';
 import { createStorage } from './storage.mjs';
 import { DiscussionManager } from './discussions.mjs';
 import { InviteStore } from './invites.mjs';
@@ -48,6 +49,7 @@ export function createContext() {
   }
   const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
   const surfaces = createSurfaces({ dataDir: config.dataDir, log });
+  const contract = createContract({ contractFile: config.contractFile, dataDir: config.dataDir, log });
   const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
 
   /* ── runtime-joined agents ──
@@ -138,7 +140,7 @@ export function createContext() {
 
   return {
     config, log, messages, sessions, dialogs, registry, sse, wakeQueue,
-    hub, surfaces, storage, invites, discussions, persistJoined, persistOverrides, tokenStore,
+    hub, surfaces, storage, invites, discussions, contract, persistJoined, persistOverrides, tokenStore,
     removeAgent, restoreAgent, deletedIds: () => [...tombstoned],
   };
 }

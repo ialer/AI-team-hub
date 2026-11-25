@@ -14,6 +14,7 @@
  *   node connectors/connector.mjs --config ... --once     # one poll, for tests
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,6 +23,22 @@ import '../server/adapters/builtin.mjs';
 import { getAdapter, listAdapters } from '../server/adapters/index.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/** Persist the hub contract to a fixed, read-only location on this machine. */
+function writeContractFile(contract) {
+  try {
+    const dir = path.join(os.homedir(), '.ath', 'contracts');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'team-contract.md');
+    const body = '---\nversion: ' + contract.version + '\nsha256: ' + contract.sha256 + '\n---\n\n' + contract.text + '\n';
+    const tmp = file + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, body, 'utf8');
+    fs.renameSync(tmp, file);
+    return file;
+  } catch {
+    return null;
+  }
+}
 
 /* ── argv ─────────────────────────────────────────────── */
 function parseArgv(argv) {
@@ -199,6 +216,23 @@ async function main() {
   if (hello.sessionId) sessionId = hello.sessionId;
   log(`hello ok (session=${sessionId || 'none'})`);
 
+  /* Team contract: the hub hands it over on connect; this agent persists it
+     locally and confirms the version it is now running on. */
+  let contract = hello.contract || null;
+  if (contract) {
+    const f = writeContractFile(contract);
+    log(`contract v${contract.version} (${contract.sha256.slice(0, 12)})${f ? ' -> ' + f : ' (not persisted)'}`);
+    try {
+      await api('/api/agent/contract-ack', {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: contract.version, sha256: contract.sha256 }),
+      }, 10_000);
+    } catch (e) {
+      log(`contract ack failed: ${e.message}`);
+    }
+  }
+
   let stopping = false;
   const stopFlag = { get stopping() { return stopping; } };
   const stop = () => { stopping = true; log('stopping…'); };
@@ -242,8 +276,11 @@ async function main() {
     const started = Date.now();
     log(`wake #${ev.msgId} from ${ev.from}: ${String(ev.text || '').slice(0, 60)}`);
     try {
+      const contractPrefix = contract
+        ? `【团队契约 v${contract.version}】\n${contract.text}\n\n`
+        : '';
       const result = await driver.wake({
-        text: ev.text,
+        text: contractPrefix + ev.text,
         sessionId: ev.sessionId || sessionId,
         config: driverConfig,
       });

@@ -1,7 +1,7 @@
 import { sendJson, readBody, authenticateAgent } from '../http.mjs';
 
 export function createAgentRoutes(ctx) {
-  const { config, hub, registry, sse, wakeQueue, sessions, log } = ctx;
+  const { config, hub, registry, sse, wakeQueue, sessions, log, contract } = ctx;
   return async function agentRoutes(req, res, url, p) {
     if (p === '/api/agent/poll' && req.method === 'GET') {
       const agent = authenticateAgent(registry, url, req);
@@ -52,12 +52,23 @@ export function createAgentRoutes(ctx) {
         ok: true,
         agent: { id: agent.id, name: agent.name, mode: agent.mode },
         sessionId: registry.sessionFor(agent.id),
+        contract: contract.current(),
         transports: {
           poll: `/api/agent/poll?agent=${encodeURIComponent(agent.id)}`,
           stream: '/api/agent/stream',
           ws: `/ws?role=agent&agent=${encodeURIComponent(agent.id)}&token=<token>`,
         },
       });
+      return true;
+    }
+
+    /* ── agent: confirm it has applied a contract version ── */
+    if (p === '/api/agent/contract-ack' && req.method === 'POST') {
+      const agent = authenticateAgent(registry, url, req);
+      const body = await readBody(req);
+      contract.ack(agent.id, String(body.version || ''), String(body.sha256 || ''));
+      log.line(`contract ack ${agent.id} v${body.version}`);
+      sendJson(res, 200, { ok: true });
       return true;
     }
 
