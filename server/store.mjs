@@ -74,8 +74,10 @@ export class MessageLog {
   }
 
   /** Messages in a room with id > after, capped at `limit` (newest kept). */
-  since({ room, after = 0, limit = 200 }) {
-    return this.items.filter((m) => m.room === room && m.id > after).slice(-limit);
+  since({ room, after = 0, limit = 200, taskId = null }) {
+    return this.items
+      .filter((m) => m.room === room && m.id > after && (!taskId || m.taskId === taskId))
+      .slice(-limit);
   }
 
   /** Look up a message by id (in-memory window only). */

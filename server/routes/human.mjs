@@ -51,7 +51,8 @@ export function createHumanRoutes(ctx) {
     if (p === '/api/messages' && req.method === 'GET') {
       const room = url.searchParams.get('room') || config.defaultRoom;
       const after = Number(url.searchParams.get('after') || 0);
-      sendJson(res, 200, { messages: messages.since({ room, after }) });
+      const taskId = url.searchParams.get('taskId') || null;
+      sendJson(res, 200, { messages: messages.since({ room, after, taskId }) });
       return true;
     }
 
@@ -65,6 +66,8 @@ export function createHumanRoutes(ctx) {
         refs: Array.isArray(body.refs) ? body.refs : [],
         images: Array.isArray(body.images) ? body.images : [],
         dialog: body.dialog || null,
+        taskId: body.taskId || null,
+        threadId: body.threadId || null,
       });
       sendJson(res, 200, { ok: true, message });
       return true;

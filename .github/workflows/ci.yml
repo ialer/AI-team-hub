@@ -222,3 +222,18 @@ jobs:
               if (raw.includes('metrics seed')) { console.error('metrics leaked message text'); process.exit(1); }
             });"
           echo "metrics ok"
+
+      - name: Messages can be filtered by taskId
+        run: |
+          node server/index.mjs &
+          HUB_PID=$!
+          trap "kill $HUB_PID" EXIT
+          sleep 2
+          curl -sf -X POST http://127.0.0.1:8899/api/say -H 'Content-Type: application/json' \
+            -d '{"room":"team","from":"human","text":"loose chat"}' > /dev/null
+          curl -sf -X POST http://127.0.0.1:8899/api/say -H 'Content-Type: application/json' \
+            -d '{"room":"team","from":"human","text":"grouped","taskId":"T1"}' > /dev/null
+          N=$(curl -sf 'http://127.0.0.1:8899/api/messages?room=team&taskId=T1' | node -e "
+            let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(String(JSON.parse(s).messages.length)));")
+          [ "$N" = "1" ] || { echo "taskId filter returned $N messages, expected 1"; exit 1; }
+          echo "taskId filter ok"
