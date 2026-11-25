@@ -25,6 +25,34 @@
 | `selector` | 调一个小模型，让它输出下一个发言者 id 或 `DONE` | 未配 `discussion.selector`、返回 `DONE`、超时、返回无法识别的 id，都静默回退到 `round-robin` |
 | `mention` | 等人工在房间里 `@` 某个参与者 | 超过 `turnTimeoutSec`（默认 180 s）无人 @ 则结束，原因 `no-speaker` |
 
+> 以上三种都属**串行**（同一时刻只有一个发言人）。另有并发模式，见下节。
+
+### 并发模式：`policy.strategy = "parallel"`
+
+字段：`policy.strategy`，默认 `serial`（即上面的串行行为，保持不变）。
+
+并发模式的做法是：拆题之后，**每一题同时唤醒所有参与者各自作答**（互相看不到对方），收齐后由一位成员做一次**汇总**，再进入下一题。
+
+| 项 | 串行（默认） | 并发（`parallel`） |
+|---|---|---|
+| 每轮唤醒人数 | 1 | 全部参与者 |
+| 参与者能否看到本轮他人发言 | 能（`_buildPrompt` 带同题历史） | 不能（`_buildParallelPrompt` 刻意不带），保证独立判断 |
+| 轮次成本 | 累加：n 条发言 ≈ n × 单人延迟 | 取最大值：1 轮 ≈ **最慢那个人**的延迟 |
+| 汇总 | 无 | 每题结束后一轮 `synthesis`（可用 `policy.synthesize: false` 关闭） |
+| 结束状态 | `max-turns` | `max-rounds` |
+
+实测（本团队 4 名成员、单题）：**并发一轮 38.6 s，四条答复时间戳完全一致**（并发窗口 0 s）；同规模串行约 4 × 26 s ≈ 104 s。
+
+```jsonc
+{
+  "topic": "上线前必须检查的三件事",
+  "participants": ["bob", "carol", "dave"],
+  "policy": { "strategy": "parallel", "maxQuestions": 2 }
+}
+```
+
+适用：成员之间答案相对独立、且人数 ≥3 的任务盘查。不适用：需要逐层追问、后一个判断依赖前一个结论的讨论——那类仍用串行。
+
 ### selector 配置
 
 ```jsonc
