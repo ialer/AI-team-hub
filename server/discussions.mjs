@@ -50,6 +50,12 @@ const DEFAULTS = {
   planFirst: true,
   maxQuestions: 4,
   turnsPerQuestion: 2,
+  // 'serial'  — one speaker per turn, each sees the previous answers (default).
+  // 'parallel'— every participant answers each question concurrently, then one
+  //             synthesis turn pulls the answers together. Same quality intent,
+  //             far less wall-clock time when members are independent.
+  strategy: 'serial',
+  synthesize: true,
 };
 
 /**
@@ -159,6 +165,10 @@ export class DiscussionManager {
       }
     }
 
+    if (record.policy.strategy === 'parallel') {
+      return this._runParallel(record, state);
+    }
+
     const deadline = Date.now() + record.policy.timeoutSec * 1000;
 
     // `n` counts accepted contributions; listens do not consume a turn, so a
@@ -251,6 +261,119 @@ export class DiscussionManager {
     }
 
     if (!state.stopped) this._finish(record.id, 'max-turns', `reached ${record.policy.maxTurns} turns`);
+  }
+
+  /**
+   * Parallel strategy: for each question, wake every participant at once, then
+   * take one synthesis turn. Answers are independent (nobody sees the others'
+   * text while answering), which is what makes the round concurrent.
+   */
+  async _runParallel(record, state) {
+    const P = record.policy;
+    const deadline = Date.now() + P.timeoutSec * 1000;
+    const parts = record.participants.slice();
+    const questions = record.questions && record.questions.length ? record.questions : [null];
+    let accepted = 0;
+
+    for (let qi = 0; qi < questions.length; qi++) {
+      if (state.stopped) break;
+      if (Date.now() > deadline) { this._finish(record.id, 'timeout', 'discussion timeout'); return; }
+      if (record.tokens >= P.maxTokens) { this._finish(record.id, 'budget', 'token budget exhausted'); return; }
+      if (accepted >= P.maxTurns) break;
+
+      state.questionIndex = qi;
+      const question = questions[qi];
+      this.log.line(`discussion ${record.id} round ${qi + 1}/${questions.length} → ${parts.join(',')} (parallel)`);
+
+      // Concurrent dispatch: each _ask only resolves on its own agent's reply,
+      // so N in-flight waits do not interfere with each other.
+      const results = await Promise.all(parts.map(async (speaker) => {
+        const prompt = this._buildParallelPrompt(record, speaker, qi, question);
+        const reply = await this._ask(record, speaker, prompt, state);
+        return { speaker, reply };
+      }));
+      if (state.stopped) break;
+
+      const roundTurns = [];
+      for (const { speaker, reply } of results) {
+        if (!reply) continue;
+        if (reply.listen) {
+          record.skips = record.skips || [];
+          record.skips.push({ speaker, question: qi, at: Date.now() });
+          continue;
+        }
+        accepted += 1;
+        const turn = {
+          n: record.turns.length + 1,
+          speaker,
+          at: Date.now(),
+          text: reply.text,
+          tokens: estimateTokens(reply.text),
+          question: question === null ? undefined : qi,
+        };
+        record.turns.push(turn);
+        record.tokens += turn.tokens;
+        record.lastSpeaker = speaker;
+        roundTurns.push(turn);
+      }
+      this.store.set(record.id, record);
+      this.sse.broadcast('discussion', record);
+
+      if (!roundTurns.length) continue; // everyone passed this question
+
+      // Gate: convergence — the independent answers ended up identical.
+      if (roundTurns.length >= 2) {
+        const sims = [];
+        for (let i = 1; i < roundTurns.length; i++) sims.push(similarity(roundTurns[i - 1].text, roundTurns[i].text));
+        if (sims.every((s) => s > 0.9)) { this._finish(record.id, 'converged', 'contributions stopped changing'); return; }
+      }
+
+      // Gate: stop keywords.
+      const hit = (P.stopOn || []).find((k) => k && roundTurns.some((x) => x.text.includes(k)));
+      if (hit) { this._finish(record.id, 'keyword', `stop keyword "${hit}"`); return; }
+
+      // Synthesis: one speaker reconciles the parallel answers before moving on.
+      if (P.synthesize !== false && questions.length > 1) {
+        if (Date.now() > deadline) { this._finish(record.id, 'timeout', 'discussion timeout'); return; }
+        const speaker = parts[qi % parts.length];
+        this.log.line(`discussion ${record.id} round ${qi + 1} synthesis → ${speaker}`);
+        const prompt = this._buildPrompt(record, speaker, record.turns.length + 1, state);
+        const reply = await this._ask(record, speaker, prompt, state);
+        if (state.stopped) break;
+        if (reply && !reply.listen) {
+          const turn = {
+            n: record.turns.length + 1,
+            speaker,
+            at: Date.now(),
+            text: reply.text,
+            tokens: estimateTokens(reply.text),
+            question: qi,
+          };
+          record.turns.push(turn);
+          record.tokens += turn.tokens;
+          this.store.set(record.id, record);
+          this.sse.broadcast('discussion', record);
+        }
+      }
+    }
+
+    if (!state.stopped) {
+      this._finish(record.id, 'max-rounds', `${questions.length} round(s), ${record.turns.length} contribution(s)`);
+    }
+  }
+
+  /** Prompt for a parallel turn: no peer answers, so the opinion stays independent. */
+  _buildParallelPrompt(record, speaker, qi, question) {
+    const agent = this.registry.get(speaker);
+    return [
+      `【团队讨论】你是${agent.name}${agent.role ? `（${agent.role}）` : ''}。`,
+      `话题：${record.topic}`,
+      question ? `\n本轮要回答的问题（${qi + 1}/${record.questions.length}）：${question}` : '',
+      '',
+      '现在是并行发言：其他成员也在同时作答，你暂时看不到他们的回答，请给出你自己独立、明确的判断。',
+      '不要复述任务，不要使用 @ 提及，控制在 200 字以内。',
+      '如果你对这个问题确实没有新的补充，只回复 LISTEN（不要解释，不要客套）。',
+    ].filter(Boolean).join('\n');
   }
 
   /**

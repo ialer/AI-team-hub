@@ -378,3 +378,80 @@ test('recap groups contributions under their question', async () => {
   assert.match(text, /2\. 回滚路径怎么写？/);
   assert.match(text, /安琪|伯言/);
 });
+
+/* ── parallel strategy ─────────────────────────────────── */
+
+// Stub the selector so planning works without network access.
+function withSelector(replyText) {
+  const saved = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: replyText } }] }),
+  });
+  return () => { globalThis.fetch = saved; };
+}
+
+test('parallel strategy has everyone answer a question at once', async () => {
+  const hub = makeHub((i) => varying(i));
+  const store = makeStore();
+  const mgr = makeManager({ hub, store });
+  const rec = mgr.create({
+    topic: '并行讨论', participants: ['a', 'b', 'c'],
+    policy: { ...BASE, planFirst: false, strategy: 'parallel', maxTurns: 12 },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+
+  assert.equal(done.turns.length, 3, 'all three answered in a single round');
+  assert.deepEqual(done.turns.map((x) => x.speaker), ['a', 'b', 'c']);
+  assert.equal(done.stopReason.startsWith('1 round'), true, done.stopReason);
+});
+
+test('parallel strategy skips LISTEN and still credits the others', async () => {
+  const hub = makeHub((i, speaker) => (speaker === 'b' ? 'LISTEN' : varying(i)));
+  const store = makeStore();
+  const mgr = makeManager({ hub, store });
+  const rec = mgr.create({
+    topic: '并行弃权', participants: ['a', 'b', 'c'],
+    policy: { ...BASE, planFirst: false, strategy: 'parallel' },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+
+  assert.equal(done.turns.length, 2);
+  assert.equal(done.skips.length, 1);
+  assert.equal(done.skips[0].speaker, 'b');
+});
+
+test('parallel strategy takes one synthesis turn per planned question', async () => {
+  const restore = withSelector('第一问是什么？\n第二问是什么？');
+  try {
+    const hub = makeHub((i) => varying(i));
+    const store = makeStore();
+    const mgr = makeManager({ hub, store, config: { selector: { url: 'http://stub' } } });
+    const rec = mgr.create({
+      topic: '两问并行', participants: ['a', 'b'],
+      policy: { ...BASE, strategy: 'parallel', maxQuestions: 2 },
+    });
+    const done = await waitForStatus(mgr, rec.id, 8000);
+
+    assert.equal(done.questions.length, 2);
+    // 2 answers per question + 1 synthesis per question
+    assert.equal(done.turns.length, 6);
+    assert.equal(done.turns.filter((x) => x.question === 0).length, 3);
+    assert.equal(done.turns.filter((x) => x.question === 1).length, 3);
+  } finally {
+    restore();
+  }
+});
+
+test('serial remains the default strategy', async () => {
+  const hub = makeHub((i) => varying(i));
+  const store = makeStore();
+  const mgr = makeManager({ hub, store });
+  const rec = mgr.create({
+    topic: '默认串行', participants: ['a', 'b'],
+    policy: { ...BASE, planFirst: false, maxTurns: 2 },
+  });
+  const done = await waitForStatus(mgr, rec.id);
+  assert.equal(done.policy.strategy, 'serial');
+  assert.equal(done.stopReason, 'reached 2 turns');
+});
