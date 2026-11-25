@@ -24,6 +24,9 @@ export class Hub {
 
     this.resolveMentions = createMentionResolver(config.agents);
     this.inFlight = new Map(); // agentId -> { msgId, startedAt, timer }
+    // Wakes that arrived while the agent was mid-turn. Dropping them silently
+    // loses task messages, so they wait here and are delivered one by one.
+    this.pending = new Map(); // agentId -> payload[]
     this.streams = new Map();  // agentId -> live stream buffer
 
     // Anything that needs to react to a finished turn (e.g. a running
@@ -142,7 +145,7 @@ export class Hub {
       const agent = this.registry.get(agentId);
       if (!agent || !agent.enabled) continue;
       if (this.inFlight.has(agentId)) {
-        this.log.line(`skip ${agentId}: already running`);
+        this.queueWhileBusy(agent, message);
         continue;
       }
       if (agent.mode === 'push') this.wakeViaAdapter(agent, message);
@@ -152,13 +155,41 @@ export class Hub {
 
   /** Connector path: hand the payload to a live WebSocket, else queue it. */
   wakeViaQueue(agent, message) {
-    const payload = this.buildWakePayload(agent, message);
-    // A connected agent gets it immediately; the poll queue is the fallback for
-    // agents that only speak HTTP.
-    const delivered = typeof this.wsSender === 'function' && this.wsSender(agent.id, payload);
-    if (!delivered) this.wakeQueue.push(agent.id, payload);
-    this.markInFlight(agent.id, message.id, delivered ? 'pushed-ws' : 'queued');
-    this.sse.broadcast('typing', { who: agent.id, on: true });
+    this.deliverWake(agent.id, this.buildWakePayload(agent, message), message.id);
+  }
+
+  /**
+   * Deliver one wake: live socket first, poll queue as the HTTP fallback.
+   * Shared by the direct path and the busy-queue drain so both behave the same.
+   */
+  deliverWake(agentId, payload, msgId) {
+    const delivered = typeof this.wsSender === 'function' && this.wsSender(agentId, payload);
+    if (!delivered) this.wakeQueue.push(agentId, payload);
+    this.markInFlight(agentId, msgId, delivered ? 'pushed-ws' : 'queued');
+    this.sse.broadcast('typing', { who: agentId, on: true });
+  }
+
+  /** Keep a wake instead of dropping it when the agent is still working. */
+  queueWhileBusy(agent, message) {
+    const limit = this.config.pendingWakeLimit || 5;
+    const q = this.pending.get(agent.id) || [];
+    if (q.length >= limit) {
+      this.log.line(`drop ${agent.id}: ${limit} wakes already waiting`);
+      return;
+    }
+    q.push(this.buildWakePayload(agent, message));
+    this.pending.set(agent.id, q);
+    this.log.line(`queued ${agent.id}: busy, ${q.length} waiting`);
+  }
+
+  /** After a turn ends, start the next queued wake (if any). */
+  drainPending(agentId) {
+    const q = this.pending.get(agentId);
+    if (!q || !q.length) return;
+    const next = q.shift();
+    if (!q.length) this.pending.delete(agentId);
+    this.log.line(`dequeued ${agentId}: ${q.length} still waiting`);
+    this.deliverWake(agentId, next, next.msgId);
   }
 
   /** Register the WebSocket delivery hook. Returns true when the agent is connected. */
@@ -255,6 +286,8 @@ export class Hub {
       this.inFlight.delete(agentId);
       this.wakeQueue.clear(agentId);
       this.sse.broadcast('typing', { who: agentId, on: false });
+      // Timeout is not a reason to lose the next task message: try it.
+      this.drainPending(agentId);
       this.systemNotice(
         this.notificationRoom(agentId),
         `${this.displayName(agentId)} 超时未响应（${this.config.wakeTimeout}s）`,
@@ -270,6 +303,9 @@ export class Hub {
     clearTimeout(entry.timer);
     this.inFlight.delete(agentId);
     if (reason === 'replied') this.sse.broadcast('typing', { who: agentId, on: false });
+    // A turn just finished: hand the next waiting wake over instead of leaving
+    // it stranded until someone mentions the agent again.
+    this.drainPending(agentId);
   }
 
   /**
