@@ -13,7 +13,7 @@ import { getAdapter } from './adapters/index.mjs';
 import { EventEmitter } from 'node:events';
 
 export class Hub {
-  constructor({ config, log, messages, registry, sse, wakeQueue, dialogs }) {
+  constructor({ config, log, messages, registry, sse, wakeQueue, dialogs, contract = null }) {
     this.config = config;
     this.log = log;
     this.messages = messages;
@@ -21,6 +21,7 @@ export class Hub {
     this.sse = sse;
     this.wakeQueue = wakeQueue;
     this.dialogs = dialogs;
+    this.contract = contract;
 
     this.resolveMentions = createMentionResolver(config.agents);
     this.inFlight = new Map(); // agentId -> { msgId, startedAt, timer }
@@ -222,8 +223,10 @@ export class Hub {
 
     try {
       const sessionId = this.registry.sessionFor(agent.id);
+      const c = this.contract && this.contract.current();
+      const contractPrefix = c ? `【团队契约 v${c.version}】\n${c.text}\n\n` : '';
       const result = await adapter.wake({
-        text: message.text,
+        text: contractPrefix + message.text,
         sessionId,
         config: agent.adapterConfig || {},
       });

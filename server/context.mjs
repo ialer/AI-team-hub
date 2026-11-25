@@ -47,9 +47,9 @@ export function createContext() {
     if (config.adminToken && !tokenStore.peek(agent.id)) tokenStore.seed(agent.id, legacyToken(agent.id));
     tokenStore.ensure(agent.id);
   }
-  const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs });
-  const surfaces = createSurfaces({ dataDir: config.dataDir, log });
   const contract = createContract({ contractFile: config.contractFile, dataDir: config.dataDir, log });
+  const hub = new Hub({ config, log, messages, registry, sse, wakeQueue, dialogs, contract });
+  const surfaces = createSurfaces({ dataDir: config.dataDir, log });
   const storage = createStorage({ dataDir: config.dataDir, storage: config.storage, log });
 
   /* ── runtime-joined agents ──
