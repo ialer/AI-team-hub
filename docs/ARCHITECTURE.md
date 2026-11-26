@@ -77,7 +77,7 @@ agent 回帖 → clearInFlight() → drainPending() → 投递第 2 条
 
 ---
 
-## 为什么只有Bob会"被占用"
+## 为什么只有长任务成员会"被占用"
 
 同一套代码，只有长任务成员出问题，是因为三个失效点叠加：
 
@@ -88,7 +88,7 @@ agent 回帖 → clearInFlight() → drainPending() → 投递第 2 条
 | dsh 会话 | `stored session ... is corrupt` | 上一条运行被 connector 超时强杀，zstd 日志写了半行 | 脚本检测到 corrupt 时把会话移开、自动开新会话 |
 
 另有一条隐性污染：`docker exec` 默认以 root 进入容器，headless dsh 因此以 root 写 `session.lock`，
-而常驻的 web dsh 以 957 运行，权限不一致。现在 connector 侧固定 `docker exec -u 1000:1000`。
+而常驻的 web dsh 以普通 uid 运行，权限不一致。现在 connector 侧固定 `docker exec -u <uid>:<gid>`。
 
 **给其他成员的启示**：短任务（几秒到几十秒）几乎撞不上；任务越接近区分钟级，越需要这三件套。
 

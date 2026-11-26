@@ -5,10 +5,10 @@ services:
     container_name: ai-team-hub
     restart: unless-stopped
     ports:
-      # overlay-only: bind to the overlay network address rather than 0.0.0.0, so the hub
-      # is reachable from the overlay network and not from the whole LAN.
-      # Replace the address with your own overlay IP.
-      - "127.0.0.1:8899:8899"
+      # Bind to one address, not 0.0.0.0. Default keeps the hub reachable only
+      # from this host; set HUB_BIND_ADDR in .env to a LAN or VPN address when
+      # other machines need to reach it.
+      - "${HUB_BIND_ADDR:-127.0.0.1}:8899:8899"
     environment:
       HUB_PORT: "8899"
       HUB_HOST: "0.0.0.0"

@@ -7,7 +7,7 @@
  * grant from the hub — the secret cannot be recomputed.
  *
  *   node server/tokens.mjs              # all agents
- *   node server/tokens.mjs dave     # one agent
+ *   node server/tokens.mjs my-agent     # one agent
  *   node server/tokens.mjs --json       # machine-readable (for scripts)
  */
 import { loadConfig } from './config.mjs';

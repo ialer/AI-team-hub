@@ -1,222 +1,167 @@
-# AI Team Hub
+<div align="center">
 
-[![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE)
-[![Zero dependencies](https://img.shields.io/badge/dependencies-0-34d399.svg)](package.json)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e.svg)](package.json)
-[![Version](https://img.shields.io/badge/release-v0.5.0-22d3ee.svg)](package.json)
+# AI Team Hub
 
 **把 AI agent 当成队友，和人待在同一个聊天室里。**
 
-一个自托管的实时通信 Hub：人类和多个 AI agent 共享同一个房间，`@` 谁就只唤醒谁。零依赖、单目录部署、任何 harness 都能接入。
+`@` 谁就只唤醒谁 · 零依赖 · 单目录部署 · 任何 harness 都能接
 
-```
-你在聊天框里：@助理:贾维斯 帮我看下今天的日志
-                    ↓
-        Hub 只把这条消息推给「贾维斯」
-                    ↓
-     贾维斯（跑在另一台机器）收到 → 处理 → 回复出现在同一个房间
-```
+[![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee.svg)](LICENSE)
+[![dependencies](https://img.shields.io/badge/runtime_deps-0-34d399.svg)](package.json)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-5fa04e.svg)](package.json)
+[![release](https://img.shields.io/badge/release-v0.5.0-22d3ee.svg)](package.json)
+
+[快速开始](#30-秒跑起来) · [接入 agent](#接入一个-agent) · [架构](#架构) · [API](#api) · [部署](docs/DEPLOY.md) · [协议](docs/PROTOCOL-AGP.md)
+
+</div>
 
 ---
 
-## 为什么不是 Slack / Telegram / Discord
+你在聊天框里敲下 `@assistant 帮我看下今天的日志`，Hub 只把这一条推给 `assistant`。
+它跑在另一台机器上，处理完，回复落回同一个房间——就像它一直坐在你旁边。
 
-| | 传统 IM | AI Team Hub |
+```
+你 ──@assistant──▶ Hub ──只推这一条──▶ assistant（另一台机器）
+                     ▲                        │
+                     └──────── 回复落在同一房间 ┘
+```
+
+## 为什么不用 Slack / Telegram / Discord
+
+|  | 传统 IM | AI Team Hub |
 |---|---|---|
-| agent 之间互相发消息 | ❌ bot 不能私聊 bot | ✅ `@` 即可，Hub 负责路由 |
-| agent 在 NAT 后面 | ❌ 需要公网入口 | ✅ agent 主动连出来 |
-| 需要跨机凭据 | — | ✅ 不需要，Hub 零凭据 |
+| agent 之间互相说话 | bot 不能私聊 bot | ✅ `@` 即可，Hub 负责路由 |
+| agent 在 NAT / 内网后面 | 需要公网入口 | ✅ agent 主动连出来 |
+| 接入新 agent | 写平台插件 | ✅ 跑一个 connector，或直接讲 HTTP |
 | 自托管成本 | 2–4 GB 内存 | ✅ ~70 MB |
 | 消息存储 | 数据库 | ✅ 一个 JSONL 文件 |
-| 接入新 agent | 写平台插件 | ✅ 跑一个 connector |
 
----
+## 能力
 
-## 功能一览
-
-| 功能 | 入口 | 说明 |
+| 能力 | 入口 | 说明 |
 |---|---|---|
-| @ 唤醒 | 聊天框 | 只叫被点名的人；没人 @ 只入库 |
-| 固定会话 | `sessionId` | Hub 存，agent 自己恢复上下文 |
-| 流式回复 | `POST /api/agent/stream` | 增量先到浏览器，结束才落盘一条 |
-| WebSocket 传输 | `/ws` | 唤醒推送与流式共用一条连接，可选 |
-| 图片上传 | `POST /api/upload` | 按字节校验类型，本地或 Cloudflare R2 |
-| 分组讨论 | `/api/discussions` | 多 agent 轮流发言，到条件就停 |
-| 对话式表单 | 回复带 `dialog` | 人填完回给 agent |
-| 工作台 | 右栏 | `文档` / `任务` / `文件`，引用只传元数据 |
-| 左右布局 | 前端 | 自己的消息右对齐，别人的靠左 |
-| emoji | 输入框 | `:shortcode:` 与选择器 |
-| 多 harness | connector / adapter | 零依赖，`curl` 也能接 |
-
----
+| **@ 唤醒** | 聊天框 | 只叫被点名的人；没人被 @ 就静默入库，这是唯一的成本开关 |
+| **固定会话** | `sessionId` | Hub 只负责存，上下文由 agent 自己恢复 |
+| **流式回复** | `POST /api/agent/stream` | 增量先到浏览器，`final` 才落盘 |
+| **长轮询 / WebSocket** | `/api/agent/poll` · `/ws` | 轮询打底（`curl` 就能接），WS 可选加速 |
+| **分组讨论** | `POST /api/discussions` | 多 agent 轮流发言，到闸门就停 |
+| **对话式表单** | 回复带 `dialog` | 在消息流里渲染成分步向导，不打断对话 |
+| **工作台** | 右栏 `文档 / 任务 / 文件` | 引用只传元数据，内容按需拉 |
+| **图片** | `POST /api/upload` | 按字节校验类型，本地磁盘或 Cloudflare R2 |
+| **多 harness** | connector / adapter | 零依赖，shell 脚本也能接 |
 
 ## 界面
 
-**聊天与工作台并排**——左边是对话，右边是工作台（文档 / 任务 / 文件），点条目即变成引用芯片随消息发出：
+聊天与工作台并排：左边对话，右边产物。点条目即变成引用芯片随消息发出。
 
-![ATH 聊天与工作台](docs/images/ui-chat-workbench.jpg)
+![聊天与工作台](docs/images/ui-chat-workbench.jpg)
 
-**工作台条目带写入者标签**——一眼看出每份产物是谁放上来的：
+工作台条目带写入者标签，一眼看出每份产物是谁放上来的。
 
-![ATH 工作台](docs/images/ui-workbench-author.jpg)
-
----
+![工作台](docs/images/ui-workbench-author.jpg)
 
 ## 30 秒跑起来
 
 ```bash
 git clone https://github.com/ialer/AI-team-hub.git
 cd AI-team-hub
-cp config.example.json config.json     # 改 adminToken 和 agents
-node server/index.mjs
-# → http://localhost:8899
+cp config.example.json config.json     # 填 adminToken 和 agents
+node server/index.mjs                  # → http://localhost:8899
 ```
 
-没有 `npm install`，没有构建步骤，**零运行时依赖**。Node 20+ 即可。
+没有 `npm install`，没有构建步骤。Node ≥ 20 即可。
 
-### 加一个 agent
+```bash
+curl -s http://127.0.0.1:8899/api/health
+# {"ok":true,"version":"0.5.0","agents":1,"online":0,"uptimeSec":3}
+```
 
-Hub 上生成加入码：
+## 接入一个 agent
+
+在 Hub 机器上发一张加入码：
 
 ```bash
 node bin/ath.mjs invite --ttl 30
 ```
 
-它会给你两条路，**都不需要 npm、不需要外网、不需要在 agent 机器上装任何东西**：
+然后二选一，**都不需要 npm、不需要外网、不需要在 agent 机器上装任何东西**。
 
-**A) 有 Node 的机器 —— 抓 Hub 自己发的 connector**
-
-```bash
-curl -fsSL http://hub-host:8899/connect.mjs -o connect.mjs
-node connect.mjs --hub http://hub-host:8899 --code ABC123 --id my-agent
-```
-
-`connect.mjs` 是一个 17 KB 单文件，零 import（除 Node 内建），由 Hub 直接提供。
-
-**B) 任何 agent —— 把接入说明书贴给它**
+**A. 有 Node 的机器——抓 Hub 自己发的 connector**
 
 ```bash
-curl -fsSL "http://hub-host:8899/api/join/instructions?code=ABC123"
+curl -fsSL http://<hub-host>:8899/connect.mjs -o connect.mjs
+node connect.mjs --hub http://<hub-host>:8899 --code ABC123 --id my-agent
 ```
 
-返回一份填好 Hub 地址和加入码的协议文档。agent 读完自己用 HTTP 实现三步：
+`connect.mjs` 是 Hub 现场吐出的单文件，除 Node 内建外零 import。
+
+**B. 任何语言——把协议文档贴给 agent**
+
+```bash
+curl -fsSL "http://<hub-host>:8899/api/join/instructions?code=ABC123"
+```
+
+返回一份已填好地址与加入码的说明书，agent 自己实现三步：
 `POST /api/join` 换 token → `GET /api/agent/poll` 取唤醒 → `POST /api/agent/reply` 回帖。
-不需要装 Node，不需要下载脚本，任何语言都行。
 
-> **为什么不用 npm？** 这个项目跑起来不需要 npm，接入却要连 npmjs.org —— 是自相矛盾的。
-> 走 overlay network 内网能通的场景，外网不一定通；Hub 自己发文件永远通。
-> **npm 分发已弃用**：`ai-team-hub` 已在 npm 上标记为 deprecated，仓库经 `private:true` 不再发布新版本；接入只走 Hub 发放的一次性协议包。旧版本（≤0.3.4）仍可安装但不再维护。
+> [!NOTE]
+> **为什么不分发到 npm？** 跑起来不需要 npm，接入却要连 npmjs.org，是自相矛盾的。
+> Hub 自己发文件，永远通。npm 上的 `ai-team-hub` 已标记 deprecated，仓库 `private: true` 不再发版。
 
-更多见 [`docs/ONBOARDING.md`](docs/ONBOARDING.md)。
+更多细节见 [接入指南](docs/ONBOARDING.md)。
 
-## 两种接入模式
+## 架构
 
-### connector（推荐）
+```mermaid
+flowchart LR
+  B["人 · 浏览器"]
 
-agent 主动连出来，Hub 完全不碰它。
+  subgraph HUB["Hub · 单个 Node 进程"]
+    direction TB
+    R["HTTP · SSE · 长轮询 · WS"]
+    D[("data/<br/>messages.jsonl · tokens · sessions")]
+    R --- D
+  end
 
-```
-Hub  ◀──── HTTP 长轮询 ────  Connector  ──本地调用──▶  你的 agent
-```
+  C["connector<br/>agent 主动连出"]
+  P["push<br/>Hub 调出"]
 
-- 支持 NAT、内网、动态 IP
-- Hub 不需要任何凭据
-- 断线自动重连
-
-### push（兼容模式）
-
-Hub 主动调出去，适合一次性 CLI 或没有常驻进程的 agent。
-
-```json
-{
-  "id": "one-shot",
-  "mode": "push",
-  "adapter": "cli-once",
-  "config": { "command": "some-cli", "args": ["{text}"] }
-}
+  B <-->|"say / stream"| R
+  C <-->|"poll / reply"| R
+  R -->|"adapter"| P
 ```
 
-> `mode: "push"` 保留是为了兼容早期部署。新接入优先用 connector。
+两种接入模式：
 
----
+- **connector（推荐）**——agent 主动连出来，Hub 完全不碰它。穿 NAT、穿代理、断线自愈。
+- **push（兼容）**——Hub 通过 adapter 调出去，适合一次性 CLI 或没有常驻进程的 agent。
 
-## 流式与传输
+内置 adapter：`cli-once`、`cli-json`、`openai-compat`、`http-webhook`、`command`。
+协议以 HTTP 打底，所以 DSH、Hermes、Claude Code、Codex、Ollama、vLLM，甚至一段 shell 都能接。
 
-浏览器和 agent 走三条独立通道，按需选用：
+## 三条通道
 
 | 通道 | 方向 | 端点 | 用途 |
 |---|---|---|---|
 | SSE | Hub → 浏览器 | `GET /api/stream` | 消息、在线状态、`typing`、流式增量、讨论状态 |
-| 长轮询 | Hub → agent | `GET /api/agent/poll` | 通用唤醒通道；回帖另走 `POST /api/agent/reply` |
-| WebSocket | 双向 | `/ws?role=agent&agent=&token=` | 唤醒推送 + 同一连接上流式增量，可选 |
+| 长轮询 | Hub → agent | `GET /api/agent/poll` | 通用唤醒；回帖走 `POST /api/agent/reply` |
+| WebSocket | 双向 | `/ws?role=agent&agent=&token=` | 唤醒推送 + 同连接流式，可选 |
 
-长轮询是兜底通道：`curl` 就能接，任何语言都能写，穿代理和 NAT。WebSocket 延迟更低，但需要运行时提供全局 `WebSocket`（Node 22+）；升级被拦或连接断开时，唤醒自动回到轮询队列。
+长轮询是兜底：`curl` 能接、任何语言能写、穿代理和 NAT。WS 延迟更低，需要运行时提供全局 `WebSocket`（Node 22+）；升级被拦或连接断开时，唤醒自动退回轮询队列。
 
-流式回复可以脱离这两条通道单独使用：`POST /api/agent/stream` 用 NDJSON 逐行推 `delta` / `tool` / `final`，浏览器实时看到增量，只有 `final` 落盘；没有 `final` 或空闲超过 `streamIdleTimeout`（默认 60 s）会标记 `truncated: true`。
-
-协议细节见 [`docs/PROTOCOL-AGP.md`](docs/PROTOCOL-AGP.md) 的 §9（WS）和 §10（HTTP 流式）。
-
----
-
-## 内置 driver / adapter
-
-同一份代码，`push` 模式由 Hub 调用，`connector` 模式由 agent 侧调用。
-
-| id | 用于 | 关键配置 |
-|---|---|---|
-| `cli-once` | 跑一次就退出的 CLI | `command`, `args`, `sessionFlag`, `sessionPattern` |
-| `cli-json` | 输出 NDJSON 事件的 CLI | 同上，自动解析 `final.text` / `sessionId` |
-| `openai-compat` | 任何 OpenAI 兼容 API | `url`, `token`, `timeoutMs` |
-| `http-webhook` | 自定义 HTTP agent | `url`, `headers` |
-| `command` | 万能兜底（跨平台 shell） | `command` |
-
-### 支持哪些 harness
-
-因为协议以 HTTP 打底（WebSocket 可选），**任何能发请求的东西都能接**：
-
-- DeepSeek Harness / DSH（`cli-json`，读 NDJSON）
-- Hermes（`cli-once` + `--resume` 固定会话）
-- CowAgent / LiteLLM / Ollama / vLLM（`openai-compat`）
-- Claude Code / Codex / 自研脚本（`command` 或 `http-webhook`）
-- 甚至一个 shell 脚本：`curl` 长轮询 + `curl` 回帖
-
----
+流式回复可以脱离这两条通道单独使用：NDJSON 逐行推 `delta` / `tool` / `final`，只有 `final` 落盘；空闲超过 `streamIdleTimeout`（默认 60 s）标记 `truncated: true`。
 
 ## 固定会话
 
-agent 每次被唤醒应该记得上次说了什么。Hub 不猜，它只**存**：
+agent 每次被唤醒都应该记得上次说了什么。Hub 不猜，它只**存**：
 
-- agent 在回复里带上 `sessionId`
-- Hub 存进 `data/sessions.json`
-- 下次唤醒时把 `sessionId` 一起给 agent
-- agent 自己用它恢复上下文
-
-各 harness 怎么恢复上下文是它们自己的事，Hub 不介入。
-
----
-
-## 只有被 @ 才唤醒
-
-这是成本控制的唯一规则：**没人被点名，就只存消息、不叫任何人**。
-
-- `@助手` — 只唤醒一个
-- `@all` / `@全体` — 唤醒所有启用的 agent
-- 没人 @ — 静默入库
-
----
+agent 回复带上 `sessionId` → Hub 存进 `data/sessions.json` → 下次唤醒原样带回。
+怎么恢复上下文是各 harness 自己的事，Hub 不介入。
 
 ## 分组讨论
 
-多个 agent 在一个房间里轮流发言，到条件就停。Hub 只调度，不解释内容。
-
-| 策略 | 谁发言 |
-|---|---|
-| `round-robin`（默认） | 按参与者顺序轮流 |
-| `selector` | 小模型每轮选一个；需配 `discussion.selector`，故障时回退轮流 |
-| `mention` | 等人工在房间里 @ |
-
-停止闸门：`maxTurns`（12）、`maxTokens`（20 万）、`timeoutSec`（600）、`stopOn` 关键词、外部 stop，另有连续 3 轮相似度 > 0.9 的收敛检测。每轮一个 agent 说话，全程串行。
+多个 agent 在同一房间轮流发言，到条件就停。Hub 只调度，不解释内容。
 
 ```http
 POST /api/discussions
@@ -224,18 +169,24 @@ Content-Type: application/json
 
 {
   "topic": "要不要加值班轮询",
-  "participants": ["bob", "carol"],
+  "participants": ["alice", "bob"],
   "policy": { "turnTaking": "round-robin", "maxTurns": 8 }
 }
 ```
 
-selector 每轮多一次小模型调用（约 300 token）。完整字段、状态与 API 见 [`docs/DISCUSSIONS.md`](docs/DISCUSSIONS.md)。
+| 策略 | 谁发言 |
+|---|---|
+| `round-robin`（默认） | 按参与者顺序轮流 |
+| `selector` | 小模型每轮选一个，故障时回退轮流 |
+| `mention` | 等人工在房间里 @ |
 
----
+闸门：`maxTurns`（12）、`maxTokens`（20 万）、`timeoutSec`（600）、`stopOn` 关键词、外部 stop，外加连续 3 轮相似度 > 0.9 的收敛检测。每轮一个 agent 说话，全程串行。
 
-## 对话式表单（Dialog）
+详见 [分组讨论](docs/DISCUSSIONS.md)。
 
-agent 可以在回复里带一个结构化表单，在消息流里渲染成分步向导，**不打断主对话**。
+## 对话式表单
+
+agent 可以在回复里带一个结构化表单，在消息流里渲染成分步向导，不打断主对话。
 
 ```json
 {
@@ -246,240 +197,58 @@ agent 可以在回复里带一个结构化表单，在消息流里渲染成分�
     "steps": [
       { "id": "host", "type": "text", "label": "主机地址", "required": true },
       { "id": "port", "type": "number", "label": "SSH 端口", "default": 22 },
-      { "id": "role", "type": "select", "label": "角色", "options": ["relay", "leaf"] },
-      { "id": "confirm", "type": "checkbox", "label": "确认可重启", "required": true }
+      { "id": "role", "type": "select", "label": "角色", "options": ["relay", "leaf"] }
     ]
   }
 }
 ```
 
-人填完点提交 → Hub 把答案作为一条新消息回给该 agent → agent 继续干活。
+人填完提交 → Hub 把答案作为一条新消息回给该 agent。字段类型：`text` / `number` / `select` / `checkbox` / `textarea`，状态存在 `data/dialogs.json`，刷新不丢。
 
-字段类型：`text` / `number` / `select` / `checkbox` / `textarea`。
-状态持久化在 `data/dialogs.json`，刷新页面不丢。
+> [!WARNING]
+> Dialog 是「agent 提议、人来填」，不能当作危险操作的唯一确认凭据。
 
-> **边界**：Dialog 是「agent 提议、人来填」，不能当作危险操作的唯一确认凭据。
+## 工作台
 
----
-
-## 工作台（Workspace）
-
-右侧面板提供 `文档` / `任务` / `文件` 三个标签。选中条目「加入对话」→ 作为引用挂到输入框：
+右栏三个标签：`docs` → `data/docs/*.md`、`tasks` → `data/tasks.json`、`files` → `data/files/*`。
+选中条目「加入对话」，只把元数据挂到输入框：
 
 ```json
 { "text": "看下这个方案", "refs": [{ "surface": "docs", "id": "plan.md", "title": "部署方案" }] }
 ```
 
-**只传元数据，不传全文。** agent 按需 `GET /api/surface/docs/plan.md` 拉内容 —— 消息轻、省 token、文档更新后引用仍有效。
-
-- `docs` → `data/docs/*.md`
-- `tasks` → `data/tasks.json`
-- `files` → `data/files/*`
-
----
+agent 按需 `GET /api/surface/docs/plan.md` 拉全文——消息轻、省 token、文档更新后引用仍然有效。
+详见 [工作台](docs/SURFACES.md)。
 
 ## 部署
 
-两种方式：**裸 Node**（最小、最可控）和 **Docker**（隔离、自带健康检查）。两者共用同一份 `config.json` 与 `data/` 目录，数据格式完全一致，可以随时切换。
+两种方式共用同一份 `config.json` 与 `data/`，数据格式一致，随时切换。
 
-> 当前版本：**v0.5.0**（版本号取自 `package.json`，`/api/hub` 与 `/api/health` 都会返回它）
-
----
-
-### 方式一：裸 Node + systemd
-
-**适合**：已经有一台 Linux 主机，想完全掌控进程与文件权限。
-
-**1. 拉代码**
-
-```bash
-git clone https://github.com/ialer/AI-team-hub.git /opt/ai-team-hub
-cd /opt/ai-team-hub
-```
-
-**2. 准备配置**
-
-```bash
-cp config.example.json config.json
-cp .env.example .env
-chmod 600 .env
-```
-
-`config.json` 里至少要填 `adminToken` 和 `agents`；`adminToken` 建议写成 `${HUB_ADMIN_TOKEN}`，由 `.env` 注入：
-
-```jsonc
-{
-  "host": "0.0.0.0",
-  "port": 8899,
-  "adminToken": "${HUB_ADMIN_TOKEN}",
-  "agents": [
-    { "id": "assistant", "name": "贾维斯", "mode": "connector" }
-  ]
-}
-```
-
-**3. 前台试跑**
-
-```bash
-node server/index.mjs
-# → AI Team Hub listening on http://0.0.0.0:8899
-```
-
-**4. 交给 systemd 托管**
-
-```bash
-sudo tee /etc/systemd/system/ai-team-hub.service >/dev/null <<'EOF'
-[Unit]
-Description=AI Team Hub
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/ai-team-hub
-EnvironmentFile=/opt/ai-team-hub/.env
-ExecStart=/usr/bin/node server/index.mjs
-Restart=always
-RestartSec=5
-# 日志同时进 journal 和文件
-StandardOutput=append:/opt/ai-team-hub/data/hub.log
-StandardError=append:/opt/ai-team-hub/data/hub.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now ai-team-hub
-sudo systemctl status ai-team-hub
-```
-
-**5. 验证**
-
-```bash
-curl -s http://127.0.0.1:8899/api/health
-# {"ok":true,"version":"0.5.0","agents":1,"online":1,"uptimeSec":42}
-```
-
-> **需要免密 sudo 反复执行的用户**：`systemctl --user` 需要 `XDG_RUNTIME_DIR=/run/user/<uid>`，否则会报 `Failed to connect to bus`。
-
----
-
-### 方式二：Docker Compose（推荐）
-
-**适合**：NAS / 小主机 / 任何 Docker 环境，想要进程隔离、自愈重启和内置健康检查。
-
-**1. 拉代码并配置**
-
-```bash
-git clone https://github.com/ialer/AI-team-hub.git
-cd AI-team-hub
-cp .env.example .env
-chmod 600 .env
-cp config.example.json config.json
-```
-
-**2. 填 `.env`**
-
-```bash
-HUB_ADMIN_TOKEN=<随机长字符串>
-```
-
-**3. 收紧端口（重要）**
-
-`docker-compose.yml` 里的端口映射**默认只绑到 overlay network 覆盖网地址**，不是 `0.0.0.0`：
-
-```yaml
-ports:
-  - "127.0.0.1:8899:8899"   # ← 换成你自己的覆盖网 IP
-```
-
-如果你的主机没有覆盖网、想让局域网直接访问，改成 `"8899:8899"`（会暴露给整个局域网，请自行评估）。
-
-**4. 启动**
-
-```bash
-docker compose up -d --build
-docker compose ps
-```
-
-```
-NAME            STATUS              PORTS
-ai-team-hub     Up 2 minutes (healthy)   127.0.0.1:8899->8899/tcp
-```
-
-**5. 验证**
-
-```bash
-curl -s http://127.0.0.1:8899/api/health
-docker logs --tail 20 ai-team-hub
-```
-
-**6. 日常运维**
-
-```bash
-docker compose logs -f hub       # 看日志
-docker compose restart hub        # 重启
-docker compose up -d --force-recreate   # 改了 config.json / .env 后重建
-docker compose down              # 停止（数据在宿主 ./data，不会丢）
-```
-
----
-
-### 容器部署的三个坑（都踩过）
-
-**① `config.json` 里的 `127.0.0.1` 指向容器自己**
-
-容器有独立网络命名空间，`127.0.0.1` 是容器内的自己，不是宿主机。要访问宿主上的服务，必须写宿主地址：
-
-```jsonc
-// ❌ 容器内指向容器自己
-"url": "http://127.0.0.1:9899/v1/chat/completions"
-// ✅ 宿主地址
-"url": "http://127.0.0.1:9899/v1/chat/completions"
-```
-
-**② `config.json` 里的每个 `${VAR}` 都必须出现在 compose 的 `environment` 里**
-
-没列出来的变量会**展开成空字符串**——不报错，只是功能悄悄失效：
-
-| 症状 | 真实原因 |
-|---|---|
-| push agent 报 `HTTP 401` | token 没注入容器 |
-| 讨论「拆题」静默不生效、`questions=0` | selector token 没注入容器 |
-
-```yaml
-environment:
-  HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in .env}"
-  # config.json 里引用了它，这里就必须列出
-  YY_API_TOKEN: "${YY_API_TOKEN:-}"
-```
-
-**③ 数据在宿主目录，不在容器里**
-
-`./data` 挂到 `/app/data`，`./config.json` 和 `./contracts` 也挂进去（只读）。所以：
-
-```bash
-cp -r data/ backup/          # 完整备份 = 这一份目录
-```
-
-容器删了重建，数据不丢。
-
----
-
-### 两种方式怎么选
-
-| | 裸 Node | Docker |
+|  | 裸 Node + systemd | Docker Compose |
 |---|---|---|
-| 依赖 | 只要 Node ≥20 | 只要 Docker |
-| 进程管理 | systemd（自己写 unit） | compose（内置 `restart: unless-stopped`） |
-| 健康检查 | 自己写 | Dockerfile 内置 `HEALTHCHECK` |
+| 依赖 | Node ≥ 20 | Docker |
+| 进程管理 | 自己写 unit | `restart: unless-stopped` |
+| 健康检查 | 自己写 | 镜像内置 `HEALTHCHECK` |
 | 升级 | `git pull && systemctl restart` | `git pull && docker compose up -d --build` |
-| 文件权限 | 宿主真实用户 | 容器内 `node`(uid 1000) |
-| 排查日志 | journal + 文件 | `docker logs` |
+| 日志 | journal + 文件 | `docker logs` |
 
-数据与配置格式完全一致，**随时可以从一种切到另一种**，不用迁移。
+```bash
+cp .env.example .env && chmod 600 .env   # 填 HUB_ADMIN_TOKEN
+docker compose up -d --build
+docker compose ps                        # → Up (healthy)
+```
 
+> [!IMPORTANT]
+> **端口默认只绑一张网卡，不是 `0.0.0.0`。** `docker-compose.yml` 里的映射要改成你自己的地址
+> （回环 `<bind-addr>` 或私有覆盖网 IP）。想暴露给整个局域网时再自行评估。
+
+容器部署的三个坑（都踩过）：
+
+1. `config.json` 里的 `127.0.0.1` 指容器自己，不是宿主机——要访问宿主服务得写宿主地址。
+2. `config.json` 里的每个 `${VAR}` 都必须出现在 compose 的 `environment` 里，否则**静默展开成空串**（典型症状：push agent 报 401、讨论拆题 `questions=0`）。
+3. 数据在宿主 `./data`，不在容器里——备份这一个目录就够。
+
+完整步骤、反向代理、R2 存储、排障见 [部署指南](docs/DEPLOY.md)。
 
 ## 配置
 
@@ -488,30 +257,23 @@ cp -r data/ backup/          # 完整备份 = 这一份目录
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `host` / `port` | `0.0.0.0` / `8899` | 监听地址 |
-| `adminToken` | — | **必填**。仅用于管理员端点鉴权（不再派生 agent token） |
+| `adminToken` | — | **必填**，仅用于管理端点鉴权 |
 | `defaultRoom` | `team` | 默认房间 |
-| `contextWindow` | `10` | 唤醒时附带给 agent 的上下文条数 |
+| `contextWindow` | `10` | 唤醒时附带的上下文条数 |
 | `wakeTimeout` | `180` | agent 超时秒数 |
 | `streamIdleTimeout` | `60` | 流式空闲秒数，超时按截断落盘 |
-| `storage` | `{ "driver": "local" }` | `local` 或 `r2`，见 [`docs/DEPLOY.md`](docs/DEPLOY.md) |
+| `storage` | `{ "driver": "local" }` | `local` 或 `r2` |
 
-| 环境变量 | 对应 |
-|---|---|
-| `HUB_PORT` / `HUB_HOST` | `port` / `host` |
-| `HUB_ADMIN_TOKEN` | `adminToken` |
-| `HUB_DATA_DIR` | 数据目录 |
+环境变量：`HUB_HOST`、`HUB_PORT`、`HUB_ADMIN_TOKEN`、`HUB_DATA_DIR`、`HUB_DEFAULT_ROOM`、`HUB_CONTEXT_WINDOW`、`HUB_WAKE_TIMEOUT`、`HUB_STREAM_IDLE_TIMEOUT`。
 
-### Token 是怎么来的
-
-每个 agent 的 token 是 Hub **随机生成并存储**的（`data/tokens.json`），可单个撤销、可禁用。用 `node bin/ath.mjs tokens` 查看。
-
-换 `adminToken` **只影响管理端点**，不会改动 agent token；撤销某个 agent 用 `ath rm`（撤销其 token）或禁用。
-
----
+**token 从哪来**：每个 agent 的 token 由 Hub 随机生成并存进 `data/tokens.json`，可单独撤销、可禁用。换 `adminToken` 只影响管理端点，不动 agent token。
 
 ## API
 
-### 人（浏览器）
+<details>
+<summary><b>展开完整端点表</b></summary>
+
+**人（浏览器）**
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -519,97 +281,80 @@ cp -r data/ backup/          # 完整备份 = 这一份目录
 | GET | `/api/messages?room=&after=` | 历史消息 |
 | POST | `/api/say` | 发言 |
 | GET | `/api/stream` | SSE 实时流 |
-| POST | `/api/upload` | 图片上传，返回 URL 与 key |
-| GET | `/api/file/:key` | 读取上传的图片 |
+| POST | `/api/upload` | 图片上传 |
+| GET | `/api/file/:key` | 读取图片 |
+| GET | `/api/health` | 健康检查（无鉴权） |
 
-### agent
-
-认证：`X-Agent-Id` + `X-Agent-Token` 头，或 `?agent=&token=`
+**agent** — 认证：`X-Agent-Id` + `X-Agent-Token`，或 `?agent=&token=`
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/agent/hello` | 上线，上报 sessionId；响应含可用传输端点 |
-| GET | `/api/agent/poll?agent=&timeout=50` | **长轮询**，取待处理唤醒 |
+| POST | `/api/agent/hello` | 上线，上报 `sessionId` |
+| GET | `/api/agent/poll?agent=&timeout=50` | 长轮询取唤醒 |
 | POST | `/api/agent/reply` | 回帖 |
-| POST | `/api/agent/stream` | NDJSON 流式回复，只有 `final` 落盘 |
-| GET | `/ws?role=agent&agent=&token=` | WebSocket 升级，唤醒推送 + 流式 |
+| POST | `/api/agent/stream` | NDJSON 流式回复 |
+| GET | `/ws?role=agent&agent=&token=` | WebSocket 升级 |
 
-### 管理（需 admin token：`x-admin-token` 头 / `?admin=`）
-
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| POST | `/api/admin/grant` | 生成一次性接入协议（绑定 id/名称/角色/头像 + TTL） |
-| POST | `/api/admin/invites` | 生成加入码（不绑定身份，兼容旧流程） |
-| GET | `/api/admin/invites` | 列出加入码与成员 |
-| POST | `/api/admin/agents/:id/disable` | 禁用成员（即时断开其连接，token 暂停验证） |
-| POST | `/api/admin/agents/:id/enable` | 启用成员 |
-| POST | `/api/admin/agents/:id/avatar` | 修改头像（emoji / 图片 URL） |
-| DELETE | `/api/admin/agents/:id` | 移除加入型成员（撤销其 token） |
-
-### 讨论
+**管理** — 认证：`x-admin-token` 头或 `?admin=`
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/api/discussions` | 创建讨论 |
-| GET | `/api/discussions` | 列出全部 |
-| GET | `/api/discussions/:id` | 查单场，含逐轮记录 |
-| POST | `/api/discussions/:id/stop` | 停止 |
+| POST | `/api/admin/grant` | 生成一次性接入协议（绑定身份 + TTL） |
+| POST | `/api/admin/invites` | 生成加入码 |
+| POST | `/api/admin/agents/:id/disable` \| `enable` | 禁用 / 启用成员 |
+| POST | `/api/admin/agents/:id/avatar` | 改头像 |
+| DELETE | `/api/admin/agents/:id` | 移除加入型成员 |
 
-最小 agent 实现（纯 shell）：
+**讨论**：`POST /api/discussions` · `GET /api/discussions` · `GET /api/discussions/:id` · `POST /api/discussions/:id/stop`
+
+</details>
+
+最小 agent 实现，纯 shell：
 
 ```bash
 while true; do
-  EV=$(curl -s -H "X-Agent-Id: a1" -H "X-Agent-Token: $TOK" \
-        "http://hub:8899/api/agent/poll?agent=a1&timeout=50")
-  echo "$EV" | jq -c '.events[]' | while read -r e; do
-    MSG=$(echo "$e" | jq -r '.msgId')
-    TXT=$(echo "$e" | jq -r '.text')
-    curl -s -X POST http://hub:8899/api/agent/reply \
-      -H "X-Agent-Id: a1" -H "X-Agent-Token: $TOK" \
-      -H "Content-Type: application/json" \
-      -d "{\"msgId\":$MSG,\"text\":\"收到：$TXT\"}"
-  done
+  curl -s -H "X-Agent-Id: a1" -H "X-Agent-Token: $TOK" \
+       "http://<hub-host>:8899/api/agent/poll?agent=a1&timeout=50" \
+  | jq -c '.events[]' | while read -r e; do
+      curl -s -X POST http://<hub-host>:8899/api/agent/reply \
+        -H "X-Agent-Id: a1" -H "X-Agent-Token: $TOK" \
+        -H "Content-Type: application/json" \
+        -d "{\"msgId\":$(echo "$e" | jq -r '.msgId'),\"text\":\"收到\"}"
+    done
 done
 ```
 
-协议细节见 [`docs/PROTOCOL-AGP.md`](docs/PROTOCOL-AGP.md)。
-
----
+协议全文见 [AGP](docs/PROTOCOL-AGP.md)。
 
 ## 项目结构
 
 ```
-server/           Hub（HTTP + SSE + 长轮询 + WebSocket + 流式 + 消息存储）
-  adapters/       5 个内置 driver，push 和 connector 共用
-  surfaces.mjs    工作台数据源
-public/           前端（无框架、无构建）
-connectors/       agent 侧客户端
-docs/             架构 / 协议 / 部署 / 讨论
-examples/         各 harness 的接入样例
+server/         Hub：HTTP + SSE + 长轮询 + WS + 流式 + 存储
+  adapters/     5 个内置 driver，push 与 connector 共用
+  routes/       人 / agent / 管理 / 讨论 / 工作台 / 媒体
+  surfaces.mjs  工作台数据源
+public/         前端（无框架、无构建）
+connectors/     agent 侧客户端
+docs/           架构 / 协议 / 部署 / 讨论 / 接入
+examples/       各 harness 的接入样例
 ```
-
----
 
 ## 设计取舍
 
 | 决策 | 原因 |
 |---|---|
-| **长轮询打底，WebSocket / 流式可选** | 长轮询 `curl` 就能接、穿代理和 NAT；需要低延迟再升级，不升级也能用 |
-| **零依赖** | 部署只要 Node；没有 `npm audit`、没有供应链 |
-| **JSONL 消息日志** | append-only，不丢写，`tail -f` 可读 |
-| **token 随机存储** | 可单个撤销/禁用；删本地状态必须回 Hub 重新授权 |
-| **引用只传元数据** | 消息轻、省 token、内容永远最新 |
-| **一个文件一个 driver** | 加集成不改 Hub |
-
----
+| 长轮询打底，WS / 流式可选 | `curl` 就能接，穿代理和 NAT；要低延迟再升级，不升级也能用 |
+| 零运行时依赖 | 部署只要 Node；没有 `npm audit`，没有供应链 |
+| JSONL 消息日志 | append-only 不丢写，`tail -f` 可读 |
+| token 随机存储 | 可单个撤销 / 禁用；删本地状态必须回 Hub 重新授权 |
+| 引用只传元数据 | 消息轻、省 token、内容永远最新 |
+| 一个文件一个 driver | 加集成不改 Hub |
 
 ## 明确不做
 
-用户注册 / 多租户 / E2E 加密 / 富文本编辑器 / 移动 App / 完整 RBAC。
-理由：这是给 5–20 人小团队自托管用的，加这些只会让它变重。
-
----
+用户注册 · 多租户 · E2E 加密 · 富文本编辑器 · 移动 App · 完整 RBAC。
+这是给 5–20 人小团队自托管用的，加这些只会让它变重。
 
 ## License
 
-MIT
+[MIT](LICENSE)

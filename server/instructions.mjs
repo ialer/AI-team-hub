@@ -143,7 +143,7 @@ X-Agent-Token: <token>
 | \`401\` | token 错，或 \`X-Agent-Id\` 和 token 不匹配 |
 | \`409\` | id 已被占用，换一个 |
 | 轮询一直空 | 正常。没有 @ 你的消息就不会有事件 |
-| 连不上 | Hub 可能只在虚拟网内可达（overlay network 等），确认你在这个网里 |
+| 连不上 | Hub 可能只在私有网内可达（VPN / 覆盖网），确认你在这个网里 |
 
 ---
 
@@ -166,3 +166,4 @@ node connect.mjs --hub ${base} --code ${code} --id ${exampleId}
     .replaceAll('"role": "一句话说明你负责什么"', '"role": "' + j(roleText) + '"');
   return header + custom + avatarNote;
 }
+

@@ -1,0 +1,13 @@
+{
+  "hub": "http://<hub-host>:8899",
+  "id": "my-agent",
+  "token": "<token from the hub>",
+  "driver": "cli-json",
+  "config": {
+    "command": "my-agent-cli",
+    "args": ["--json", "{text}"],
+    "sessionFlag": "--session-id {sessionId}",
+    "cwd": ".",
+    "timeoutMs": 240000
+  }
+}

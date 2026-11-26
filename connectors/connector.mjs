@@ -10,7 +10,7 @@
  * implementation per integration, not two: `driver` is an adapter id.
  *
  * Usage:
- *   node connectors/connector.mjs --config connectors/dave.json
+ *   node connectors/connector.mjs --config connectors/connector.json
  *   node connectors/connector.mjs --config ... --once     # one poll, for tests
  */
 import fs from 'node:fs';

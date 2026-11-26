@@ -1,4 +1,6 @@
 @echo off
-REM AI Team Hub connector for alice (XPS). Started at logon by Task Scheduler.
-cd /d "D:\ai\项目\AI-team-hub"
-node connectors\connector.mjs --config connectors\run\alice.json >> "%TEMP%\alice-connector.log" 2>&1
+REM AI Team Hub connector launcher (Windows).
+REM Set CONNECTOR_CONFIG to your own connector JSON; keep it out of git.
+cd /d "%~dp0"
+if "%CONNECTOR_CONFIG%"=="" set CONNECTOR_CONFIG=connectors\run\connector.json
+node connectors\connector.mjs --config "%CONNECTOR_CONFIG%" >> "%TEMP%\ath-connector.log" 2>&1

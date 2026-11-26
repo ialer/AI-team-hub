@@ -4,6 +4,10 @@ config.json
 connector.json
 *.local.json
 
+# Local connector configs — they hold agent tokens and local paths
+connectors/run/*.json
+!connectors/run/connector.example.json
+
 # Runtime data (messages, sessions, dialogs, docs, files)
 data/
 

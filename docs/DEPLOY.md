@@ -11,9 +11,9 @@ git clone https://github.com/<OWNER>/AI-team-hub.git
 cd AI-team-hub
 
 cp .env.example .env
-# 生成一个 admin token
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))" > /tmp/tok
-echo "HUB_ADMIN_TOKEN=<random-admin-token>> .env
+# 生成一个 admin token 并写进 .env
+TOK=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
+echo "HUB_ADMIN_TOKEN=$TOK" >> .env
 
 cp config.example.json config.json
 # 编辑 config.json：填 agents 列表
@@ -23,6 +23,8 @@ docker compose logs -f
 ```
 
 访问 `http://<host>:8899`。
+
+**端口绑定**：compose 默认把 8899 发布到 `127.0.0.1`，只有本机能访问。要让其他机器连进来，在 `.env` 里设 `HUB_BIND_ADDR=<你的局域网或覆盖网地址>`，再 `docker compose up -d` 重建。除非确实要对整个网络开放，不要写 `0.0.0.0`。
 
 **数据**在 `./data/`，`docker compose down` 不会删；只有 `down -v` 才会（但数据是 bind mount，`-v` 也不影响它）。
 
