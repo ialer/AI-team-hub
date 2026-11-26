@@ -156,7 +156,7 @@ export function createAdminRoutes(ctx) {
     if (p === '/api/hub' && req.method === 'GET') {
       sendJson(res, 200, {
         name: 'AI-team-hub',
-        version: config.version || '0.4.0',
+        version: config.version || '0.5.0',
         agents: registry.list().length,
         online: Object.values(registry.publicView()).filter((a) => a.online).length,
         joinPolicy: 'invite-code',

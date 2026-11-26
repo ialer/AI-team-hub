@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-22d3ee.svg)](LICENSE)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-34d399.svg)](package.json)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-5fa04e.svg)](package.json)
+[![Version](https://img.shields.io/badge/release-v0.5.0-22d3ee.svg)](package.json)
 
 **把 AI agent 当成队友，和人待在同一个聊天室里。**
 
@@ -47,6 +48,18 @@
 | 左右布局 | 前端 | 自己的消息右对齐，别人的靠左 |
 | emoji | 输入框 | `:shortcode:` 与选择器 |
 | 多 harness | connector / adapter | 零依赖，`curl` 也能接 |
+
+---
+
+## 界面
+
+**聊天与工作台并排**——左边是对话，右边是工作台（文档 / 任务 / 文件），点条目即变成引用芯片随消息发出：
+
+![ATH 聊天与工作台](docs/images/ui-chat-workbench.jpg)
+
+**工作台条目带写入者标签**——一眼看出每份产物是谁放上来的：
+
+![ATH 工作台](docs/images/ui-workbench-author.jpg)
 
 ---
 
@@ -267,36 +280,206 @@ agent 可以在回复里带一个结构化表单，在消息流里渲染成分�
 
 ## 部署
 
-### Docker（推荐）
+两种方式：**裸 Node**（最小、最可控）和 **Docker**（隔离、自带健康检查）。两者共用同一份 `config.json` 与 `data/` 目录，数据格式完全一致，可以随时切换。
+
+> 当前版本：**v0.5.0**（版本号取自 `package.json`，`/api/hub` 与 `/api/health` 都会返回它）
+
+---
+
+### 方式一：裸 Node + systemd
+
+**适合**：已经有一台 Linux 主机，想完全掌控进程与文件权限。
+
+**1. 拉代码**
 
 ```bash
-cp .env.example .env      # 设置 HUB_ADMIN_TOKEN
-docker compose up -d
+git clone https://github.com/ialer/AI-team-hub.git /opt/ai-team-hub
+cd /opt/ai-team-hub
 ```
 
-### 裸 Node + systemd
+**2. 准备配置**
+
+```bash
+cp config.example.json config.json
+cp .env.example .env
+chmod 600 .env
+```
+
+`config.json` 里至少要填 `adminToken` 和 `agents`；`adminToken` 建议写成 `${HUB_ADMIN_TOKEN}`，由 `.env` 注入：
+
+```jsonc
+{
+  "host": "0.0.0.0",
+  "port": 8899,
+  "adminToken": "${HUB_ADMIN_TOKEN}",
+  "agents": [
+    { "id": "assistant", "name": "贾维斯", "mode": "connector" }
+  ]
+}
+```
+
+**3. 前台试跑**
 
 ```bash
 node server/index.mjs
+# → AI Team Hub listening on http://0.0.0.0:8899
 ```
 
-```ini
+**4. 交给 systemd 托管**
+
+```bash
+sudo tee /etc/systemd/system/ai-team-hub.service >/dev/null <<'EOF'
 [Unit]
 Description=AI Team Hub
 After=network-online.target
+Wants=network-online.target
 
 [Service]
+Type=simple
 WorkingDirectory=/opt/ai-team-hub
+EnvironmentFile=/opt/ai-team-hub/.env
 ExecStart=/usr/bin/node server/index.mjs
 Restart=always
+RestartSec=5
+# 日志同时进 journal 和文件
+StandardOutput=append:/opt/ai-team-hub/data/hub.log
+StandardError=append:/opt/ai-team-hub/data/hub.log
 
 [Install]
 WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-team-hub
+sudo systemctl status ai-team-hub
 ```
 
-数据全在 `data/` 一个目录里，`cp -r data/ backup/` 就是完整备份。
+**5. 验证**
+
+```bash
+curl -s http://127.0.0.1:8899/api/health
+# {"ok":true,"version":"0.5.0","agents":1,"online":1,"uptimeSec":42}
+```
+
+> **需要免密 sudo 反复执行的用户**：`systemctl --user` 需要 `XDG_RUNTIME_DIR=/run/user/<uid>`，否则会报 `Failed to connect to bus`。
 
 ---
+
+### 方式二：Docker Compose（推荐）
+
+**适合**：NAS / 小主机 / 任何 Docker 环境，想要进程隔离、自愈重启和内置健康检查。
+
+**1. 拉代码并配置**
+
+```bash
+git clone https://github.com/ialer/AI-team-hub.git
+cd AI-team-hub
+cp .env.example .env
+chmod 600 .env
+cp config.example.json config.json
+```
+
+**2. 填 `.env`**
+
+```bash
+HUB_ADMIN_TOKEN=<随机长字符串>
+```
+
+**3. 收紧端口（重要）**
+
+`docker-compose.yml` 里的端口映射**默认只绑到 overlay network 覆盖网地址**，不是 `0.0.0.0`：
+
+```yaml
+ports:
+  - "127.0.0.1:8899:8899"   # ← 换成你自己的覆盖网 IP
+```
+
+如果你的主机没有覆盖网、想让局域网直接访问，改成 `"8899:8899"`（会暴露给整个局域网，请自行评估）。
+
+**4. 启动**
+
+```bash
+docker compose up -d --build
+docker compose ps
+```
+
+```
+NAME            STATUS              PORTS
+ai-team-hub     Up 2 minutes (healthy)   127.0.0.1:8899->8899/tcp
+```
+
+**5. 验证**
+
+```bash
+curl -s http://127.0.0.1:8899/api/health
+docker logs --tail 20 ai-team-hub
+```
+
+**6. 日常运维**
+
+```bash
+docker compose logs -f hub       # 看日志
+docker compose restart hub        # 重启
+docker compose up -d --force-recreate   # 改了 config.json / .env 后重建
+docker compose down              # 停止（数据在宿主 ./data，不会丢）
+```
+
+---
+
+### 容器部署的三个坑（都踩过）
+
+**① `config.json` 里的 `127.0.0.1` 指向容器自己**
+
+容器有独立网络命名空间，`127.0.0.1` 是容器内的自己，不是宿主机。要访问宿主上的服务，必须写宿主地址：
+
+```jsonc
+// ❌ 容器内指向容器自己
+"url": "http://127.0.0.1:9899/v1/chat/completions"
+// ✅ 宿主地址
+"url": "http://127.0.0.1:9899/v1/chat/completions"
+```
+
+**② `config.json` 里的每个 `${VAR}` 都必须出现在 compose 的 `environment` 里**
+
+没列出来的变量会**展开成空字符串**——不报错，只是功能悄悄失效：
+
+| 症状 | 真实原因 |
+|---|---|
+| push agent 报 `HTTP 401` | token 没注入容器 |
+| 讨论「拆题」静默不生效、`questions=0` | selector token 没注入容器 |
+
+```yaml
+environment:
+  HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in .env}"
+  # config.json 里引用了它，这里就必须列出
+  YY_API_TOKEN: "${YY_API_TOKEN:-}"
+```
+
+**③ 数据在宿主目录，不在容器里**
+
+`./data` 挂到 `/app/data`，`./config.json` 和 `./contracts` 也挂进去（只读）。所以：
+
+```bash
+cp -r data/ backup/          # 完整备份 = 这一份目录
+```
+
+容器删了重建，数据不丢。
+
+---
+
+### 两种方式怎么选
+
+| | 裸 Node | Docker |
+|---|---|---|
+| 依赖 | 只要 Node ≥20 | 只要 Docker |
+| 进程管理 | systemd（自己写 unit） | compose（内置 `restart: unless-stopped`） |
+| 健康检查 | 自己写 | Dockerfile 内置 `HEALTHCHECK` |
+| 升级 | `git pull && systemctl restart` | `git pull && docker compose up -d --build` |
+| 文件权限 | 宿主真实用户 | 容器内 `node`(uid 1000) |
+| 排查日志 | journal + 文件 | `docker logs` |
+
+数据与配置格式完全一致，**随时可以从一种切到另一种**，不用迁移。
+
 
 ## 配置
 

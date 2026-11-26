@@ -9,6 +9,10 @@ COPY package.json ./
 COPY server ./server
 COPY public ./public
 COPY connectors ./connectors
+# The team contract ships with the image as a fallback. In production it is
+# usually mounted from the host so it can be edited without a rebuild; without
+# that mount the baked-in copy still keeps the contract working.
+COPY contracts ./contracts
 
 # Data lives here; mount a volume to keep it across upgrades.
 RUN mkdir -p /app/data && chown -R node:node /app

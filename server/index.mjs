@@ -43,7 +43,7 @@ const server = http.createServer(async (req, res) => {
       const online = Object.values(agents).filter((a) => a.online).length;
       return sendJson(res, 200, {
         ok: true,
-        version: config.version || '0.4.0',
+        version: config.version || '0.5.0',
         agents: Object.keys(agents).length,
         online,
         uptimeSec: Math.round(process.uptime()),

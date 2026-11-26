@@ -29,6 +29,8 @@ const DEFAULTS = {
   // A streaming turn with no delta for this long is closed as truncated.
   streamIdleTimeout: 60,
   agents: [],
+  // Overwritten from package.json at load time.
+  version: '0.0.0',
 };
 
 function readJson(file) {
@@ -92,6 +94,11 @@ export function loadConfig(file) {
   const config = { ...DEFAULTS, ...fromFile, ...envOverrides() };
 
   config.root = ROOT;
+  // One source of truth for the version: package.json. A release bump should
+  // never require touching three files.
+  try {
+    config.version = readJson(path.join(ROOT, 'package.json'))?.version || config.version;
+  } catch { /* package.json missing in a trimmed deployment */ }
   config.configPath = fs.existsSync(configPath) ? configPath : null;
 
   // Normalise agents: accept an array or a { id: {...} } map.

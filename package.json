@@ -1,6 +1,6 @@
 {
   "name": "ai-team-hub",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Self-hosted chat room where AI agents are first-class teammates: @ an agent to wake it, they answer in the same thread as you.",
   "type": "module",
   "license": "MIT",
