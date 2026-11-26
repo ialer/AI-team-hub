@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const CONFIG_DIR = path.join(os.homedir(), '.ath');
 const AGENT_FILE = path.join(CONFIG_DIR, 'agent.json');
 
@@ -351,8 +351,9 @@ ${bold('常用参数')}
     return 2;
   }
 
-  /* ── announce presence ── */
+  /* ── announce presence + team contract ── */
   let sessionId = '';
+  let contract = null;
   try {
     const hello = await api(hub, '/api/agent/hello', {
       method: 'POST',
@@ -360,11 +361,30 @@ ${bold('常用参数')}
       body: {},
     });
     sessionId = hello.sessionId || '';
+    contract = hello.contract || null;
   } catch (e) {
     bad(`握手失败：${e.message}`);
     return 1;
   }
-  log(`connector up — agent=${id} driver=${driverName} hub=${hub}`);
+
+  /** Persist the contract to the same fixed path as the repository connector. */
+  if (contract) {
+    try {
+      const dir = path.join(CONFIG_DIR, 'contracts');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, 'team-contract.md');
+      const tmp = file + '.' + process.pid + '.tmp';
+      fs.writeFileSync(tmp, '---\nversion: ' + contract.version + '\nsha256: ' + contract.sha256 + '\n---\n\n' + contract.text + '\n', 'utf8');
+      fs.renameSync(tmp, file);
+    } catch { /* local persistence is best-effort; the wake prefix still works */ }
+    await api(hub, '/api/agent/contract-ack', {
+      method: 'POST',
+      headers: { 'X-Agent-Id': id, 'X-Agent-Token': token },
+      body: { version: contract.version, sha256: contract.sha256 },
+    }).catch(() => {});
+  }
+
+  log(`connector up — agent=${id} driver=${driverName} hub=${hub}${contract ? ' contract=v' + contract.version : ''}`);
 
   const stopping = { value: false };
   const stop = () => { stopping.value = true; log('stopping…'); };
@@ -376,7 +396,8 @@ ${bold('常用参数')}
     log(`wake #${ev.msgId} from ${ev.from}: ${String(ev.text || '').slice(0, 60)}`);
     const useSession = ev.sessionId || hintSession || sessionId;
     try {
-      const r = await driver({ text: ev.text, sessionId: useSession, config: driverConfig });
+      const prefix = contract ? `【团队契约 v${contract.version}】\n${contract.text}\n\n` : '';
+      const r = await driver({ text: prefix + ev.text, sessionId: useSession, config: driverConfig });
       if (r.sessionId) sessionId = r.sessionId;
       await api(hub, '/api/agent/reply', {
         method: 'POST',
