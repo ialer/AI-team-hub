@@ -2,9 +2,9 @@
 
 # AI Team Hub
 
-**把 AI agent 当成队友，和人待在同一个聊天室里。**
+一个自托管的聊天服务器，AI agent 可以作为普通成员加入。
 
-`@` 谁就只唤醒谁 · 零依赖 · 单目录部署 · 任何 harness 都能接
+@ 唤醒 · agent 可跑在任意机器 · 零依赖 · 一个 Node 进程
 
 [![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee.svg)](LICENSE)
@@ -17,7 +17,7 @@
 
 </div>
 
-一个自托管的实时通信 Hub：人和多个 agent 共享同一个房间，`@` 谁就只唤醒谁。消息、会话、产物都落在本地目录，一个 Node 进程，没有数据库。
+在消息里 `@` 某个 agent，Hub 只把这条消息转给它；agent 在自己的机器上处理，把回复发回同一个房间。没有人被 `@` 时，消息只存档，不唤醒任何人。
 
 ```
 你 ──@assistant──▶ Hub ──只推这一条──▶ assistant（另一台机器）
@@ -38,7 +38,7 @@
 
 | 能力 | 说明 |
 |---|---|
-| **@ 唤醒** | 只叫被点名的人；没人被 @ 就静默入库 |
+| **@ 唤醒** | 在聊天框 `@` 谁，谁才跑 |
 | **固定会话** | Hub 存 `sessionId`，上下文由 agent 自己恢复 |
 | **流式回复** | 增量先到浏览器，`final` 才落盘 |
 | **长轮询 / WebSocket** | 轮询打底（`curl` 就能接），WS 可选加速 |
@@ -49,7 +49,7 @@
 
 ## 界面
 
-聊天与工作台并排；工作台条目带写入者标签，一眼看出产物是谁放上来的。
+左边聊天，右边工作台；工作台的每份产物都带作者标签。
 
 ![聊天与工作台](docs/images/ui-chat-workbench.jpg)
 

@@ -2,9 +2,9 @@
 
 # AI Team Hub
 
-**Put AI agents on your team, in the same chat room as you.**
+A self-hosted chat server where AI agents join as regular members.
 
-Wake only who you `@` · zero dependencies · single-directory deploy · any harness
+Wake with `@` · agents run anywhere · zero dependencies · one Node process
 
 [![CI](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml/badge.svg)](https://github.com/ialer/AI-team-hub/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22d3ee.svg)](LICENSE)
@@ -13,11 +13,11 @@ Wake only who you `@` · zero dependencies · single-directory deploy · any har
 
 [Quick start](#quick-start) · [Add an agent](#add-an-agent) · [Deploy](#deploy) · [Docs](#docs)
 
-简体中文 · [English](README.en.md)
+[简体中文](README.md) · English
 
 </div>
 
-A self-hosted realtime hub where humans and multiple AI agents share one room: `@` a name and only that agent wakes up. Messages, sessions and artifacts all stay in a local directory — one Node process, no database.
+`@` an agent in a message and the Hub forwards that message to it alone; the agent runs on its own machine and posts the reply in the same room. Messages without an `@` are archived and wake nobody.
 
 ```
 you ──@assistant──▶ Hub ──only this message──▶ assistant (another machine)
@@ -38,7 +38,7 @@ you ──@assistant──▶ Hub ──only this message──▶ assistant (an
 
 | | |
 |---|---|
-| **@ wake** | only the named agent runs; nobody `@`-ed, nothing wakes |
+| **@ wake** | only the agent you `@` runs |
 | **Sticky sessions** | the Hub stores `sessionId`; the agent restores its own context |
 | **Streaming replies** | deltas reach the browser live; only `final` is persisted |
 | **Long polling / WebSocket** | polling as the floor (`curl` works), WS optional |
@@ -49,7 +49,7 @@ you ──@assistant──▶ Hub ──only this message──▶ assistant (an
 
 ## UI
 
-Chat on the left, workspace on the right; every entry carries an author tag.
+Chat on the left, workspace on the right; every workspace entry carries an author tag.
 
 ![Chat & workspace](docs/images/ui-chat-workbench.jpg)
 
@@ -96,7 +96,7 @@ docker compose up -d --build
 curl -s http://127.0.0.1:8899/api/health
 ```
 
-Everything lives in the host's `./data` — backing up that one directory is enough.
+Everything lives in the host's `./data`, so backing up that one directory is enough.
 Port 8899 is published on `127.0.0.1` only; set `HUB_BIND_ADDR=<your address>` in `.env` to let other machines reach it.
 
 Without Docker: `node server/index.mjs` in the foreground, or hand it to systemd.
